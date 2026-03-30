@@ -18,7 +18,7 @@ const AuthShell: FC = () => {
         <h1>Doxeek</h1>
         <SignOutButton />
       </header>
-      <main style={{ background: 'salmon', flex: 1 }}>
+      <main style={{ flex: 1 }}>
         <Authenticated>
           <LayoutMain />
         </Authenticated>
