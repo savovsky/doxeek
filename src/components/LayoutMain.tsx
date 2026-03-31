@@ -2,6 +2,7 @@ import type { FC } from 'react';
 import Paper from '@mui/material/Paper';
 import { alpha } from '@mui/material/styles';
 import RelatedDocsContainer from './RelatedDocsContainer';
+import { VksSearchContainer } from './vks_search/VksSearchContainer';
 
 const OPACITY = 0.05;
 const ELEVATION = 1;
@@ -14,7 +15,7 @@ const LayoutMain: FC = () => {
         elevation={ELEVATION}
         sx={{ p: 2, m: 2, backgroundColor: (theme) => alpha(theme.palette.grey[GREY_LEVEL], OPACITY) }}
       >
-        LayoutMain
+        <VksSearchContainer />
       </Paper>
       <RelatedDocsContainer />
     </>

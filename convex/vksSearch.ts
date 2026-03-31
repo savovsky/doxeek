@@ -68,7 +68,7 @@ export const searchDecisions = action({
       namespace:            args.namespace ?? "vks-commercial",
       query:                args.query,
       limit:                args.limit ?? 20,
-      vectorScoreThreshold: args.vectorScoreThreshold ?? 0.4,
+      vectorScoreThreshold: args.vectorScoreThreshold ?? 0, // TODO: raise to 0.4 after full ingest
       ...(filters.length > 0 ? { filters } : {}),
     });
 
