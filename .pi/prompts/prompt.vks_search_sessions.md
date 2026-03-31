@@ -6,6 +6,7 @@ Read these two files in order before doing anything:
 2. Your session's plan — link is in the table in `VKS_SEARCH_PLAN.md`
 
 Then confirm you have read both and summarise:
+
 - Which session you are starting
 - Which files you will create or edit
 - The done criteria for this session
