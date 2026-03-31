@@ -17,6 +17,7 @@ export const storeChunkMetadata = internalMutation({
     department:  v.string(),
     sectionType: v.string(),
     chunkIndex:  v.number(),
+    text:        v.string(),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -24,9 +25,11 @@ export const storeChunkMetadata = internalMutation({
       .withIndex("by_ragKey", (q) => q.eq("ragKey", args.ragKey))
       .unique();
 
-    if (!existing) {
+    if (existing) {
+      // Upsert — update existing row (backfills text on re-ingest)
+      await ctx.db.patch(existing._id, args);
+    } else {
       await ctx.db.insert("vksChunkMetadata", args);
     }
-    // If already exists — skip. Re-running ingest is idempotent.
   },
 });

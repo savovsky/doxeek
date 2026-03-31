@@ -59,6 +59,7 @@ export const ingestBatch = internalAction({
       await ctx.runMutation(internal.vksIngestMutations.storeChunkMetadata, {
         ragKey, actId, actNumber, actDate, actTitle, actUrl,
         caseNumber, caseYear, department, sectionType, chunkIndex,
+        text: chunk.text,
       });
 
       ingested++;

@@ -26,5 +26,8 @@ export default defineSchema({
     department:  v.string(),
     sectionType: v.string(),
     chunkIndex:  v.number(),
-  }).index("by_ragKey", ["ragKey"]),
+    text:        v.string(),   // chunk's embeddable text content
+  })
+    .index("by_ragKey",           ["ragKey"])
+    .index("by_actId_chunkIndex", ["actId", "chunkIndex"]),
 });
