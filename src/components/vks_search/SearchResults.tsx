@@ -7,13 +7,17 @@ import { ResultCard }   from "./ResultCard";
 import type { SearchResult } from "../../hooks/useVksSearch";
 
 interface Props {
-  results:    SearchResult[];
-  isLoading:  boolean;
-  error:      string | null;
-  hasSearched: boolean;
+  results:        SearchResult[];
+  isLoading:      boolean;
+  error:          string | null;
+  hasSearched:    boolean;
+  selectedRagKey: string | null;
+  onSelectResult: (result: SearchResult) => void;
 }
 
-export function SearchResults({ results, isLoading, error, hasSearched }: Props) {
+export function SearchResults({
+  results, isLoading, error, hasSearched, selectedRagKey, onSelectResult,
+}: Props) {
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", mt: 6 }}>
@@ -31,16 +35,20 @@ export function SearchResults({ results, isLoading, error, hasSearched }: Props)
       </Alert>
     );
   }
-  if (results.length === 0) {
-    return null; // initial state — no search performed yet
-  }
+  if (results.length === 0) return null;
+
   return (
     <Stack spacing={2} sx={{ mt: 3 }}>
       <Typography variant="caption" color="text.secondary">
         {results.length} result{results.length !== 1 ? "s" : ""}
       </Typography>
       {results.map((r, i) => (
-        <ResultCard key={r.ragKey + i} result={r} />
+        <ResultCard
+          key={r.ragKey + i}
+          result={r}
+          isSelected={r.ragKey === selectedRagKey}
+          onSelect={onSelectResult}
+        />
       ))}
     </Stack>
   );
