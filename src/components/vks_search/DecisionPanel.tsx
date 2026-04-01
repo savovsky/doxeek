@@ -1,6 +1,7 @@
 import { useEffect, useRef }  from "react";
 import { useQuery }           from "convex/react";
 import { api }                from "../../../convex/_generated/api";
+import type { Doc }           from "../../../convex/_generated/dataModel";
 import Box                    from "@mui/material/Box";
 import CircularProgress       from "@mui/material/CircularProgress";
 import Divider                from "@mui/material/Divider";
@@ -56,7 +57,7 @@ export function DecisionPanel({ actId, actTitle, actUrl, highlightRagKey }: Prop
           </Box>
         ) : (
           <Stack spacing={2}>
-            {chunks.map((chunk) => {
+            {chunks.map((chunk: Doc<"vksChunkMetadata">) => {
               const isHighlighted = chunk.ragKey === highlightRagKey;
               return (
                 <Box

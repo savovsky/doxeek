@@ -1,1 +1,1 @@
-{"root":["./auth.config.ts","./auth.ts","./http.ts","./myfunctions.ts","./schema.ts"],"version":"5.9.3"}
+{"root":["./auth.config.ts","./auth.ts","./convex.config.ts","./http.ts","./myfunctions.ts","./rag.config.ts","./schema.ts","./vksdecisionqueries.ts","./vksingest.ts","./vksingestmutations.ts","./vkssearch.ts","./vkssearchqueries.ts"],"version":"5.9.3"}

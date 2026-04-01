@@ -18,12 +18,8 @@ const chunkValidator = v.object({
     caseNumber:  v.string(),
     caseYear:    v.string(),
     department:  v.string(),
-    sectionType: v.union(
-      v.literal("header"),
-      v.literal("reasoning"),
-      v.literal("ruling"),
-    ),
-    chunkIndex: v.number(),
+    chunkIndex:  v.number(),
+    // sectionType REMOVED
   }),
 });
 
@@ -38,7 +34,7 @@ export const ingestBatch = internalAction({
     for (const chunk of args.chunks) {
       const {
         actId, actNumber, actDate, actTitle, actUrl,
-        caseNumber, caseYear, department, sectionType, chunkIndex,
+        caseNumber, caseYear, department, chunkIndex,
       } = chunk.metadata;
 
       const ragKey = `${actId}_${chunkIndex}`;
@@ -49,17 +45,20 @@ export const ingestBatch = internalAction({
         key:       ragKey,
         chunks:    [chunk.text],
         filterValues: [
-          { name: "sectionType", value: sectionType },
-          { name: "department",  value: department },
-          { name: "actYear",     value: actDate.slice(0, 4) }, // "2016-04-22" → "2016"
+          { name: "department", value: department },
+          { name: "actYear",   value: actDate.slice(0, 4) }, // "2016-04-22" → "2016"
+          // sectionType REMOVED
         ],
       });
 
       // 2. Store display metadata in our own table
       await ctx.runMutation(internal.vksIngestMutations.storeChunkMetadata, {
         ragKey, actId, actNumber, actDate, actTitle, actUrl,
-        caseNumber, caseYear, department, sectionType, chunkIndex,
+        caseNumber, caseYear, department,
+        actYear: actDate.slice(0, 4), // NEW
+        chunkIndex,
         text: chunk.text,
+        // sectionType REMOVED
       });
 
       ingested++;

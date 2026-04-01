@@ -15,9 +15,10 @@ export const storeChunkMetadata = internalMutation({
     caseNumber:  v.string(),
     caseYear:    v.string(),
     department:  v.string(),
-    sectionType: v.string(),
+    actYear:     v.optional(v.string()),   // NEW: "2016" — needed for searchIndex filterField
     chunkIndex:  v.number(),
     text:        v.string(),
+    // sectionType REMOVED
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db

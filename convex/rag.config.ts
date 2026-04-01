@@ -10,13 +10,13 @@ import { openai } from "@ai-sdk/openai";
 import { components } from "./_generated/api";
 
 type VksFilterTypes = {
-  sectionType: string; // "header" | "reasoning" | "ruling"
   department: string; // "commercial" | "civil"
-  actYear: string; // "2016" — 4-char string extracted from actDate
+  actYear: string;    // "2016" — 4-char string extracted from actDate
+  // sectionType REMOVED
 };
 
 export const rag = new RAG<VksFilterTypes>(components.rag, {
   textEmbeddingModel: openai.embedding("text-embedding-3-small"),
   embeddingDimension: 1536,
-  filterNames: ["sectionType", "department", "actYear"],
+  filterNames: ["department", "actYear"],  // sectionType REMOVED
 });

@@ -4,64 +4,81 @@
 "use node";
 
 import { action } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { internal, api } from "./_generated/api";
 import { v } from "convex/values";
 import type { EntryFilter } from "@convex-dev/rag";
 import { rag } from "./rag.config";
 
 type VksFilterTypes = {
-  sectionType: string;
-  department:  string;
-  actYear:     string;
+  department: string;
+  actYear:    string;
+  // sectionType REMOVED
 };
 
 type DecisionResult = {
-  score:       number;
-  chunkText:   string;
-  ragKey:      string;
-  actId:       string;
-  actTitle:    string;
-  actUrl:      string;
-  actDate:     string;
-  actNumber:   string;
-  caseNumber:  string;
-  caseYear:    string;
-  department:  string;
-  sectionType: string;
-  chunkIndex:  number;
+  score:      number | null;   // null for keyword results (BM25 has no cosine score)
+  chunkText:  string;
+  ragKey:     string;
+  actId:      string;
+  actTitle:   string;
+  actUrl:     string;
+  actDate:    string;
+  actNumber:  string;
+  caseNumber: string;
+  caseYear:   string;
+  department: string;
+  chunkIndex: number;
+  // sectionType REMOVED
 };
 
 type MetadataRow = {
-  ragKey:      string;
-  actId:       string;
-  actTitle:    string;
-  actUrl:      string;
-  actDate:     string;
-  actNumber:   string;
-  caseNumber:  string;
-  caseYear:    string;
-  department:  string;
-  sectionType: string;
-  chunkIndex:  number;
+  ragKey:     string;
+  actId:      string;
+  actTitle:   string;
+  actUrl:     string;
+  actDate:    string;
+  actNumber:  string;
+  caseNumber: string;
+  caseYear:   string;
+  department: string;
+  chunkIndex: number;
+  // sectionType REMOVED
 } | null;
+
+/**
+ * Keyword (BM25) search — thin action wrapper around keywordSearchDecisions query.
+ * Using an action lets the UI call it via useAction, exactly like searchDecisions,
+ * so both modes share the same fire-on-Submit pattern.
+ */
+export const keywordSearchDecisions = action({
+  args: {
+    query:      v.string(),
+    department: v.optional(v.string()),
+    actYear:    v.optional(v.string()),
+    limit:      v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<DecisionResult[]> => {
+    return await ctx.runQuery(api.vksSearchQueries.keywordSearchDecisions, args);
+  },
+});
 
 export const searchDecisions = action({
   args: {
     query:       v.string(),
     namespace:   v.optional(v.string()),
-    sectionType: v.optional(v.string()), // "header"|"reasoning"|"ruling"|undefined=all
-    department:  v.optional(v.string()), // "commercial"|"civil"|undefined=all
-    actYear:     v.optional(v.string()), // exact year string e.g. "2016"|undefined=all
+    department:  v.optional(v.string()),
+    actYear:     v.optional(v.string()),
     limit:       v.optional(v.number()),
-    vectorScoreThreshold: v.optional(v.number()), // default 0.4; pass 0 to test with no threshold
+    vectorScoreThreshold: v.optional(v.number()),
+    // sectionType REMOVED
   },
   handler: async (ctx, args): Promise<DecisionResult[]> => {
     // Build filters — only include fields that were provided.
     // Omitting a filter = search across all values for that dimension.
     const filters: EntryFilter<VksFilterTypes>[] = [];
-    if (args.sectionType) filters.push({ name: "sectionType" as const, value: args.sectionType });
-    if (args.department)  filters.push({ name: "department"  as const, value: args.department });
-    if (args.actYear)     filters.push({ name: "actYear"     as const, value: args.actYear });
+    // sectionType filter REMOVED
+    if (args.department) filters.push({ name: "department" as const, value: args.department });
+    if (args.actYear)    filters.push({ name: "actYear"    as const, value: args.actYear });
 
     // 1. Vector similarity search
     const { results, entries } = await rag.search(ctx, {
@@ -94,16 +111,16 @@ export const searchDecisions = action({
         score:       result.score,
         chunkText:   result.content.map((c) => c.text).join("\n"),
         ragKey,
-        actId:       metadata?.actId      ?? "",
-        actTitle:    metadata?.actTitle    ?? "",
-        actUrl:      metadata?.actUrl      ?? "",
-        actDate:     metadata?.actDate     ?? "",
-        actNumber:   metadata?.actNumber   ?? "",
-        caseNumber:  metadata?.caseNumber  ?? "",
-        caseYear:    metadata?.caseYear    ?? "",
-        department:  metadata?.department  ?? "",
-        sectionType: metadata?.sectionType ?? "",
-        chunkIndex:  metadata?.chunkIndex  ?? 0,
+        actId:      metadata?.actId      ?? "",
+        actTitle:   metadata?.actTitle    ?? "",
+        actUrl:     metadata?.actUrl      ?? "",
+        actDate:    metadata?.actDate     ?? "",
+        actNumber:  metadata?.actNumber   ?? "",
+        caseNumber: metadata?.caseNumber  ?? "",
+        caseYear:   metadata?.caseYear    ?? "",
+        department: metadata?.department  ?? "",
+        chunkIndex: metadata?.chunkIndex  ?? 0,
+        // sectionType REMOVED
       };
     });
   },

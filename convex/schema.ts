@@ -24,10 +24,15 @@ export default defineSchema({
     caseNumber:  v.string(),
     caseYear:    v.string(),
     department:  v.string(),
-    sectionType: v.string(),
+    actYear:     v.optional(v.string()),   // "2016" — set at ingest; optional for backwards-compat with pre-S9 records (re-ingested in S11)
+    sectionType: v.optional(v.string()),   // DEPRECATED — present in pre-S9 test records only; not written by new ingest; removed after S11 re-ingest
     chunkIndex:  v.number(),
     text:        v.string(),   // chunk's embeddable text content
   })
     .index("by_ragKey",           ["ragKey"])
-    .index("by_actId_chunkIndex", ["actId", "chunkIndex"]),
+    .index("by_actId_chunkIndex", ["actId", "chunkIndex"])
+    .searchIndex("search_by_text", {
+      searchField:  "text",
+      filterFields: ["department", "actYear"],
+    }),
 });

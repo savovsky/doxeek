@@ -14,8 +14,6 @@ interface Props {
 }
 
 export function ResultCard({ result, isSelected, onSelect }: Props) {
-  const pct = Math.round(result.score * 100);
-
   return (
     <Card
       variant="outlined"
@@ -40,9 +38,11 @@ export function ResultCard({ result, isSelected, onSelect }: Props) {
               {result.actTitle}
             </Typography>
             <Stack direction="row" alignItems="center" spacing={0}>
-              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-                {pct}%
-              </Typography>
+              {result.score !== null && (
+                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+                  {Math.round(result.score * 100)}%
+                </Typography>
+              )}
               <Link
                 href={result.actUrl}
                 target="_blank"

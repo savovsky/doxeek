@@ -10,12 +10,12 @@ import { useVksSearch }    from "../../hooks/useVksSearch";
 import type { SearchResult } from "../../hooks/useVksSearch";
 
 export function VksSearchContainer() {
-  const { search, results, isLoading, error, hasSearched } = useVksSearch();
+  const { search, results, isLoading, error, hasSearched, searchMode, setSearchMode } = useVksSearch();
   const [selected, setSelected] = useState<SearchResult | null>(null);
 
   const handleSelectResult = (result: SearchResult) => {
     // Toggle off if the same card is clicked again
-    setSelected((prev) => prev?.ragKey === result.ragKey ? null : result);
+    setSelected((prev: SearchResult | null) => prev?.ragKey === result.ragKey ? null : result);
   };
 
   const showPanel = selected !== null;
@@ -29,6 +29,8 @@ export function VksSearchContainer() {
       <SearchBar
         onSearch={(params) => { setSelected(null); search(params); }}
         isLoading={isLoading}
+        searchMode={searchMode}
+        onModeChange={setSearchMode}
       />
 
       {/* Results + optional side panel */}

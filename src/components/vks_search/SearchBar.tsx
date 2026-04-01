@@ -1,43 +1,39 @@
-import { useState }  from "react";
-import Box           from "@mui/material/Box";
-import Button        from "@mui/material/Button";
-import MenuItem      from "@mui/material/MenuItem";
-import Stack         from "@mui/material/Stack";
-import TextField     from "@mui/material/TextField";
-import type { SearchParams } from "../../hooks/useVksSearch";
+import { useState }         from "react";
+import Box                  from "@mui/material/Box";
+import Button               from "@mui/material/Button";
+import Stack                from "@mui/material/Stack";
+import TextField            from "@mui/material/TextField";
+import ToggleButton         from "@mui/material/ToggleButton";
+import ToggleButtonGroup    from "@mui/material/ToggleButtonGroup";
+import type { SearchParams, SearchMode } from "../../hooks/useVksSearch";
 
 interface Props {
-  onSearch:  (params: SearchParams) => void;
-  isLoading: boolean;
+  onSearch:     (params: SearchParams) => void;
+  isLoading:    boolean;
+  searchMode:   SearchMode;
+  onModeChange: (mode: SearchMode) => void;
 }
 
-const SECTION_TYPES = [
-  { value: "",          label: "All sections" },
-  { value: "reasoning", label: "Reasoning" },
-  { value: "ruling",    label: "Ruling" },
-  { value: "header",    label: "Header" },
-];
-
-export function SearchBar({ onSearch, isLoading }: Props) {
-  const [query,       setQuery]       = useState("");
-  const [sectionType, setSectionType] = useState("");
-  const [actYear,     setActYear]     = useState("");
+export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Props) {
+  const [query,   setQuery]   = useState("");
+  const [actYear, setActYear] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSearch({
       query,
-      sectionType: sectionType || undefined,
-      department:  "commercial",   // hardcoded for POC — remove when civil is ingested
-      actYear:     actYear || undefined,
-      limit:       20,
+      department: "commercial",   // hardcoded for POC — remove when civil is ingested
+      actYear:    actYear || undefined,
+      limit:      20,
     });
   };
 
   return (
     <Box component="form" onSubmit={handleSubmit}>
       <Stack spacing={2}>
-        <Stack direction="row" spacing={1}>
+
+        {/* Row 1: query input + Search button + mode toggle */}
+        <Stack direction="row" spacing={1} alignItems="center">
           <TextField
             fullWidth
             size="small"
@@ -54,22 +50,20 @@ export function SearchBar({ onSearch, isLoading }: Props) {
           >
             {isLoading ? "Searching…" : "Search"}
           </Button>
+          <ToggleButtonGroup
+            value={searchMode}
+            exclusive
+            size="small"
+            onChange={(_, val: SearchMode | null) => { if (val) onModeChange(val); }}
+            sx={{ whiteSpace: "nowrap" }}
+          >
+            <ToggleButton value="vector"  sx={{ px: 1.5, fontSize: 13 }}>≈ Semantic</ToggleButton>
+            <ToggleButton value="keyword" sx={{ px: 1.5, fontSize: 13 }}>Aa Keyword</ToggleButton>
+          </ToggleButtonGroup>
         </Stack>
 
+        {/* Row 2: year filter only (section filter removed in S9/S10) */}
         <Stack direction="row" spacing={2}>
-          <TextField
-            select
-            size="small"
-            label="Section"
-            value={sectionType}
-            onChange={(e) => setSectionType(e.target.value)}
-            sx={{ minWidth: 160 }}
-          >
-            {SECTION_TYPES.map((o) => (
-              <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
-            ))}
-          </TextField>
-
           <TextField
             size="small"
             label="Year"
@@ -80,6 +74,7 @@ export function SearchBar({ onSearch, isLoading }: Props) {
             sx={{ width: 120 }}
           />
         </Stack>
+
       </Stack>
     </Box>
   );
