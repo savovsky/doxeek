@@ -4,7 +4,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Stack            from "@mui/material/Stack";
 import Typography       from "@mui/material/Typography";
 import { ResultCard }   from "./ResultCard";
-import type { SearchResult } from "../../hooks/useVksSearch";
+import type { SearchResult, SearchMode } from "../../hooks/useVksSearch";
 
 interface Props {
   results:        SearchResult[];
@@ -13,10 +13,11 @@ interface Props {
   hasSearched:    boolean;
   selectedRagKey: string | null;
   onSelectResult: (result: SearchResult) => void;
+  searchMode?:    SearchMode;
 }
 
 export function SearchResults({
-  results, isLoading, error, hasSearched, selectedRagKey, onSelectResult,
+  results, isLoading, error, hasSearched, selectedRagKey, onSelectResult, searchMode,
 }: Props) {
   if (isLoading) {
     return (
@@ -48,6 +49,7 @@ export function SearchResults({
           result={r}
           isSelected={r.ragKey === selectedRagKey}
           onSelect={onSelectResult}
+          searchMode={searchMode}
         />
       ))}
     </Stack>

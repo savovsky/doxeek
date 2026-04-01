@@ -59,8 +59,8 @@ interface ChunkMetadata {
   caseNumber:  string;
   caseYear:    string;
   department:  string;
-  sectionType: "header" | "reasoning" | "ruling";
   chunkIndex:  number;
+  // sectionType REMOVED in S9
 }
 interface Chunk {
   text:     string;

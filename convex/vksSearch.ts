@@ -46,9 +46,11 @@ type MetadataRow = {
 } | null;
 
 /**
- * Keyword (BM25) search — thin action wrapper around keywordSearchDecisions query.
- * Using an action lets the UI call it via useAction, exactly like searchDecisions,
- * so both modes share the same fire-on-Submit pattern.
+ * Keyword (BM25) search — action wrapper around keywordSearchDecisions query.
+ * Deduplicates results by actId: fetches up to limit×10 chunks internally,
+ * keeps the first (highest-ranked) chunk per decision, then returns up to limit
+ * unique decisions. This prevents the same decision from appearing multiple times
+ * when many of its chunks match the query.
  */
 export const keywordSearchDecisions = action({
   args: {
@@ -58,7 +60,26 @@ export const keywordSearchDecisions = action({
     limit:      v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<DecisionResult[]> => {
-    return await ctx.runQuery(api.vksSearchQueries.keywordSearchDecisions, args);
+    const limit = args.limit ?? 20;
+
+    // Fetch more chunks than needed so we have enough unique decisions after dedup.
+    // With ~20 chunks/decision on average, limit×10 gives a safe margin.
+    const fetchLimit = Math.min(limit * 10, 200);
+
+    const rows = await ctx.runQuery(api.vksSearchQueries.keywordSearchDecisions, {
+      ...args,
+      limit: fetchLimit,
+    });
+
+    // Deduplicate: keep only the first (best-ranked) chunk per decision.
+    const seen = new Set<string>();
+    const deduped = rows.filter(row => {
+      if (seen.has(row.actId)) return false;
+      seen.add(row.actId);
+      return true;
+    });
+
+    return deduped.slice(0, limit);
   },
 });
 
@@ -101,27 +122,35 @@ export const searchDecisions = action({
       { ragKeys },
     );
 
-    // 4. Join and return enriched results
-    return results.map((result) => {
-      const entry    = entries.find((e) => e.entryId === result.entryId);
-      const ragKey   = entry?.key ?? "";
-      const metadata = metadataMap[ragKey];
-
-      return {
-        score:       result.score,
-        chunkText:   result.content.map((c) => c.text).join("\n"),
-        ragKey,
-        actId:      metadata?.actId      ?? "",
-        actTitle:   metadata?.actTitle    ?? "",
-        actUrl:     metadata?.actUrl      ?? "",
-        actDate:    metadata?.actDate     ?? "",
-        actNumber:  metadata?.actNumber   ?? "",
-        caseNumber: metadata?.caseNumber  ?? "",
-        caseYear:   metadata?.caseYear    ?? "",
-        department: metadata?.department  ?? "",
-        chunkIndex: metadata?.chunkIndex  ?? 0,
-        // sectionType REMOVED
-      };
-    });
+    // 4. Join, deduplicate by actId (keep highest-scoring chunk per decision),
+    // and return enriched results.
+    // Results from rag.search() are already sorted by score descending,
+    // so the first occurrence of each actId is the best-scoring chunk.
+    const seen = new Set<string>();
+    return results
+      .map((result) => {
+        const entry    = entries.find((e) => e.entryId === result.entryId);
+        const ragKey   = entry?.key ?? "";
+        const metadata = metadataMap[ragKey];
+        return {
+          score:      result.score,
+          chunkText:  result.content.map((c) => c.text).join("\n"),
+          ragKey,
+          actId:      metadata?.actId      ?? "",
+          actTitle:   metadata?.actTitle    ?? "",
+          actUrl:     metadata?.actUrl      ?? "",
+          actDate:    metadata?.actDate     ?? "",
+          actNumber:  metadata?.actNumber   ?? "",
+          caseNumber: metadata?.caseNumber  ?? "",
+          caseYear:   metadata?.caseYear    ?? "",
+          department: metadata?.department  ?? "",
+          chunkIndex: metadata?.chunkIndex  ?? 0,
+        };
+      })
+      .filter((r) => {
+        if (seen.has(r.actId)) return false;
+        seen.add(r.actId);
+        return true;
+      });
   },
 });

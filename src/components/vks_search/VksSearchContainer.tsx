@@ -10,7 +10,7 @@ import { useVksSearch }    from "../../hooks/useVksSearch";
 import type { SearchResult } from "../../hooks/useVksSearch";
 
 export function VksSearchContainer() {
-  const { search, results, isLoading, error, hasSearched, searchMode, setSearchMode } = useVksSearch();
+  const { search, results, isLoading, error, hasSearched, searchMode, setSearchMode, lastQuery } = useVksSearch();
   const [selected, setSelected] = useState<SearchResult | null>(null);
 
   const handleSelectResult = (result: SearchResult) => {
@@ -51,6 +51,7 @@ export function VksSearchContainer() {
             hasSearched={hasSearched}
             selectedRagKey={selected?.ragKey ?? null}
             onSelectResult={handleSelectResult}
+            searchMode={searchMode}
           />
         </Box>
 
@@ -74,6 +75,8 @@ export function VksSearchContainer() {
                 actTitle={selected.actTitle}
                 actUrl={selected.actUrl}
                 highlightRagKey={selected.ragKey}
+                searchQuery={lastQuery}
+                searchMode={searchMode}
               />
             </Paper>
           </>

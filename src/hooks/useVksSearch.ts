@@ -40,9 +40,11 @@ export function useVksSearch() {
   const [error,       setError]       = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchMode,  setSearchMode]  = useState<SearchMode>("vector");
+  const [lastQuery,   setLastQuery]   = useState<string>("");
 
   const search = async (params: SearchParams) => {
     if (!params.query.trim()) return;
+    setLastQuery(params.query);
     setLoading(true);
     setError(null);
     try {
@@ -61,7 +63,17 @@ export function useVksSearch() {
     }
   };
 
+  // Switching mode resets all search state so stale results from the
+  // previous mode are never shown alongside the new mode's results.
+  const switchMode = (mode: SearchMode) => {
+    setSearchMode(mode);
+    setResults([]);
+    setError(null);
+    setHasSearched(false);
+    setLastQuery("");
+  };
+
   const clear = () => { setResults([]); setError(null); setHasSearched(false); };
 
-  return { search, results, isLoading, error, hasSearched, searchMode, setSearchMode, clear };
+  return { search, results, isLoading, error, hasSearched, searchMode, setSearchMode: switchMode, lastQuery, clear };
 }

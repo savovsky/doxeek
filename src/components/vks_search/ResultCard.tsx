@@ -5,15 +5,16 @@ import Link          from "@mui/material/Link";
 import Stack         from "@mui/material/Stack";
 import Typography    from "@mui/material/Typography";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
-import type { SearchResult } from "../../hooks/useVksSearch";
+import type { SearchResult, SearchMode } from "../../hooks/useVksSearch";
 
 interface Props {
   result:     SearchResult;
   isSelected: boolean;
   onSelect:   (result: SearchResult) => void;
+  searchMode?: SearchMode;
 }
 
-export function ResultCard({ result, isSelected, onSelect }: Props) {
+export function ResultCard({ result, isSelected, onSelect, searchMode }: Props) {
   return (
     <Card
       variant="outlined"
@@ -56,20 +57,22 @@ export function ResultCard({ result, isSelected, onSelect }: Props) {
             </Stack>
           </Stack>
 
-          {/* Chunk text excerpt */}
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{
-              display:           "-webkit-box",
-              WebkitLineClamp:   4,
-              WebkitBoxOrient:   "vertical",
-              overflow:          "hidden",
-              lineHeight:        1.6,
-            }}
-          >
-            {result.chunkText}
-          </Typography>
+          {/* Chunk text excerpt — hidden in keyword mode */}
+          {searchMode !== "keyword" && (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{
+                display:           "-webkit-box",
+                WebkitLineClamp:   4,
+                WebkitBoxOrient:   "vertical",
+                overflow:          "hidden",
+                lineHeight:        1.6,
+              }}
+            >
+              {result.chunkText}
+            </Typography>
+          )}
         </Stack>
       </CardContent>
     </Card>
