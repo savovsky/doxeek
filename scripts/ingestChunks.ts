@@ -31,6 +31,7 @@ const inputPath = flag("--input");
 const namespace = flag("--namespace") ?? "vks-commercial";
 const batchSize = parseInt(flag("--batch-size") ?? "25", 10);
 const limit     = parseInt(flag("--limit") ?? "0", 10);
+const skip      = parseInt(flag("--skip") ?? "0", 10);   // skip first N chunks (for resuming)
 const dryRun    = argv.includes("--dry-run");
 
 // Resolve Convex HTTP (site) URL — HTTP actions are served at .convex.site, not .convex.cloud
@@ -98,6 +99,7 @@ async function main() {
   console.log(`Batch size : ${batchSize}`);
   console.log(`URL        : ${dryRun ? "(dry-run)" : convexUrl}`);
   if (limit > 0) console.log(`Limit      : first ${limit} chunks`);
+  if (skip  > 0) console.log(`Skip       : first ${skip} chunks`);
   console.log("");
 
   if (!fs.existsSync(inputPath!)) {
@@ -149,8 +151,10 @@ async function main() {
       continue;
     }
 
-    batch.push(chunk);
     totalChunks++;
+    if (totalChunks <= skip) continue;   // skip already-ingested chunks
+
+    batch.push(chunk);
 
     if (batch.length >= batchSize) {
       await flushBatch();

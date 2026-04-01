@@ -102,11 +102,20 @@ export const searchDecisions = action({
     if (args.actYear)    filters.push({ name: "actYear"    as const, value: args.actYear });
 
     // 1. Vector similarity search
+    // When filtering by year, request more results internally to compensate for
+    // cross-year results that will be removed in the post-filter step below.
+    // (The RAG filter is unreliable for entries ingested before the S9 filterNames
+    // change; we apply a reliable post-filter using vksChunkMetadata.actDate.)
+    const requestedLimit  = args.limit ?? 20;
+    const internalLimit   = args.actYear
+      ? Math.min(requestedLimit * 6, 120)
+      : requestedLimit;
+
     const { results, entries } = await rag.search(ctx, {
       namespace:            args.namespace ?? "vks-commercial",
       query:                args.query,
-      limit:                args.limit ?? 20,
-      vectorScoreThreshold: args.vectorScoreThreshold ?? 0.4, // 0.4 production default; pass 0 to debug
+      limit:                internalLimit,
+      vectorScoreThreshold: args.vectorScoreThreshold ?? 0.4, // confirmed at 100-decision scale (S12): results score 50-71%, no good results cut off
       ...(filters.length > 0 ? { filters } : {}),
     });
 
@@ -123,9 +132,9 @@ export const searchDecisions = action({
     );
 
     // 4. Join, deduplicate by actId (keep highest-scoring chunk per decision),
-    // and return enriched results.
-    // Results from rag.search() are already sorted by score descending,
-    // so the first occurrence of each actId is the best-scoring chunk.
+    // and post-filter by actYear using actDate from vksChunkMetadata.
+    // The post-filter is the reliable source of truth — the RAG filter index
+    // may be stale for entries ingested before the S9 filterNames change.
     const seen = new Set<string>();
     return results
       .map((result) => {
@@ -148,9 +157,15 @@ export const searchDecisions = action({
         };
       })
       .filter((r) => {
+        // Drop entries with no metadata (stale RAG vectors with no vksChunkMetadata row)
+        if (!r.actId) return false;
+        // Post-filter by year — reliable because actDate comes from our own table
+        if (args.actYear && !r.actDate.startsWith(args.actYear)) return false;
+        // Deduplicate: keep best-scoring chunk per decision
         if (seen.has(r.actId)) return false;
         seen.add(r.actId);
         return true;
-      });
+      })
+      .slice(0, requestedLimit);
   },
 });
