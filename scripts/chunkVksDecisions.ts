@@ -129,8 +129,9 @@
  * CHUNK SIZING
  * ------------
  *   MIN_MERGE_SIZE  = 150 chars  — paragraphs below this are merged into neighbour
- *   MAX_CHUNK_SIZE  = 1,400 chars — paragraphs above this are split at sentence boundaries
- *   OVERLAP_SENTENCES = 2        — sentences carried over between split sub-chunks
+ *   MAX_CHUNK_SIZE  = 500 chars  — smaller chunks = sharper, more distinctive embeddings
+ *   OVERLAP_SENTENCES = 0       — no overlap; overlap dilutes the chunk’s topic signal
+ *   actTitle          — metadata only, NOT embedded in chunk text
  *
  *
  * STATISTICS OUTPUT
@@ -158,15 +159,18 @@ const MIN_MERGE_SIZE = 150;
 
 /**
  * Maximum character length for a single chunk.
+ * Smaller chunks produce sharper, more distinctive embeddings — one concept per chunk.
  * Paragraphs longer than this are split at sentence boundaries.
  */
-const MAX_CHUNK_SIZE = 1_400;
+const MAX_CHUNK_SIZE = 500;
 
 /**
  * Number of sentences carried over from the end of one sub-chunk to the
  * beginning of the next when splitting an oversized paragraph.
+ * Set to 0 — overlap pollutes a chunk's embedding with the adjacent chunk's topic,
+ * reducing vector search discrimination.
  */
-const OVERLAP_SENTENCES = 2;
+const OVERLAP_SENTENCES = 0;
 
 // ============================================================================
 // TYPES
@@ -471,7 +475,10 @@ function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
     }
   }
 
-  // ── Step 5 & 6: Prepend actTitle to first chunk; assign chunkIndex ────────
+  // ── Step 5 & 6: Assign chunkIndex — actTitle in metadata only, NOT embedded ──
+  // actTitle is stored in metadata for display purposes but must not be prepended
+  // to the chunk text. Including it in the embedding dilutes the chunk's topic
+  // signal with case-identity noise, reducing vector search discrimination.
   const isoDate  = toISODate(record.actDate);
   const baseMeta = {
     actId:      record.actId,
@@ -485,7 +492,7 @@ function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
   };
 
   const chunks: Chunk[] = chunkTexts.map((text, i) => ({
-    text:     i === 0 ? `${record.actTitle}\n\n${text}` : text,
+    text,                                    // actTitle NOT prepended — metadata only
     metadata: { ...baseMeta, chunkIndex: i },
   }));
 

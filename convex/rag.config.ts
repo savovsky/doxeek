@@ -16,7 +16,7 @@ type VksFilterTypes = {
 };
 
 export const rag = new RAG<VksFilterTypes>(components.rag, {
-  textEmbeddingModel: openai.embedding("text-embedding-3-small"),
-  embeddingDimension: 1536,
+  textEmbeddingModel: openai.embedding("text-embedding-3-large"),  // S14: upgraded for better multilingual quality
+  embeddingDimension: 3072,                                          // S14: 3,072-dim model (within Convex 4,096 limit)
   filterNames: ["department", "actYear"],  // sectionType REMOVED
 });
