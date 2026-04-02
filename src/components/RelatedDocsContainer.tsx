@@ -67,19 +67,27 @@ const RelatedDocsContainer: FC = () => {
     );
   }
 
+  const MAX_DOCS_RENDER = 499;
+
   return (
     <Box data-testid='related-docs-container' sx={{ p: 2 }}>
       <Typography variant='h6'>Related Documents ({decisions.length})</Typography>
       <Stack spacing={10}>
-        {decisions.map((item) => (
-          <RelatedDoc
-            key={item.actId}
-            docContent={item.actPlainText}
-            docTitle={item.actTitle}
-            docLinkVksDomino={item.actUrl}
-            docLinkVks={`https://www.vks.bg/pregled-akt.jsp?type=ot-spisak&id=${item.actId}`}
-          />
-        ))}
+        {decisions.map((item, index) => {
+          if (index > MAX_DOCS_RENDER) {
+            return null;
+          }
+          return (
+            <RelatedDoc
+              key={item.actId}
+              index={index}
+              docContent={item.actPlainText}
+              docTitle={item.actTitle}
+              docLinkVksDomino={item.actUrl}
+              docLinkVks={`https://www.vks.bg/pregled-akt.jsp?type=ot-spisak&id=${item.actId}`}
+            />
+          );
+        })}
       </Stack>
     </Box>
   );

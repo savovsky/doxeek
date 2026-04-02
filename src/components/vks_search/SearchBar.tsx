@@ -10,9 +10,9 @@ import { TextareaAutosize } from "@mui/material";
 import { useTheme }        from "@mui/material/styles";
 import type { SearchMode, SearchParams } from "../../hooks/useVksSearch";
 
-// Limits apply to semantic (vector) mode only — keyword mode is unrestricted.
-const SEMANTIC_MAX_WORDS = 10;
-const SEMANTIC_MAX_CHARS = 150;
+// No query length limits — the hybrid + LLM re-ranking pipeline handles
+// natural language descriptions well. Longer queries give the re-ranker
+// more context and produce better results.
 
 interface Props {
   onSearch:     (params: SearchParams) => void;
@@ -26,36 +26,14 @@ export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Pro
   const [actYear, setActYear] = useState("");
   const theme = useTheme();
 
-  // ── Semantic query limits ────────────────────────────────────────────────
-  const wordCount = query.trim() === "" ? 0 : query.trim().split(/\s+/).length;
-  const charCount = query.length;
+  const isSemanticMode = searchMode === "vector";
 
-  const isSemanticMode   = searchMode === "vector";
-  const isOverWordLimit  = isSemanticMode && wordCount > SEMANTIC_MAX_WORDS;
-  const isOverCharLimit  = isSemanticMode && charCount > SEMANTIC_MAX_CHARS;
-  const isOverLimit      = isOverWordLimit || isOverCharLimit;
-
-  // Counter colour: grey → amber (>80% of either limit) → red (over limit)
-  const wordRatio  = wordCount / SEMANTIC_MAX_WORDS;
-  const charRatio  = charCount / SEMANTIC_MAX_CHARS;
-  const ratio      = Math.max(wordRatio, charRatio);
-  const counterColor =
-    !isSemanticMode ? "text.disabled"
-    : ratio > 1    ? "error.main"
-    : ratio > 0.8  ? "warning.main"
-    :                "text.disabled";
-
-  const textareaBorderColor =
-    isOverLimit
-      ? theme.palette.error.main
-      : ratio > 0.8
-      ? theme.palette.warning.main
-      : theme.palette.divider;
+  const textareaBorderColor = theme.palette.divider;
 
   // ── Submit ───────────────────────────────────────────────────────────────
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isOverLimit || !query.trim()) return;
+    if (!query.trim()) return;
     onSearch({
       query,
       department: "commercial",   // hardcoded for POC
@@ -78,8 +56,8 @@ export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Pro
               onChange={(e) => setQuery(e.target.value)}
               placeholder={
                 isSemanticMode
-                  ? "Short topic query… e.g. 'строителен договор неплащане' (max 10 words)"
-                  : "Search decisions… (Bulgarian or English)"
+                  ? "Опишете правния въпрос… напр. 'строителен договор, изпълнителят не завърши работата и отказва плащане'"
+                  : "Въведете точни термини… напр. 'чл.647 ТЗ', 'обр.19', 'неоснователно обогатяване'"
               }
               style={{
                 boxSizing:   "border-box",
@@ -97,31 +75,12 @@ export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Pro
               }}
             />
 
-            {/* Counter + hint — shown only in semantic mode */}
-            {isSemanticMode && query.length > 0 && (
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                alignItems="center"
-                sx={{ mt: 0.5, px: 0.5 }}
-              >
-                <Typography variant="caption" color="text.disabled">
-                  {isOverLimit
-                    ? isOverWordLimit
-                      ? `Too long — max ${SEMANTIC_MAX_WORDS} words for semantic search`
-                      : `Too long — max ${SEMANTIC_MAX_CHARS} characters for semantic search`
-                    : "Short, focused queries give the best results"}
-                </Typography>
-                <Typography variant="caption" color={counterColor} sx={{ whiteSpace: "nowrap", ml: 1 }}>
-                  {wordCount}/{SEMANTIC_MAX_WORDS} words · {charCount}/{SEMANTIC_MAX_CHARS} chars
-                </Typography>
-              </Stack>
-            )}
-
-            {/* Hint when field is empty and in semantic mode */}
-            {isSemanticMode && query.length === 0 && (
+            {/* Tip — shown when field is empty */}
+            {query.length === 0 && (
               <Typography variant="caption" color="text.disabled" sx={{ mt: 0.5, px: 0.5, display: "block" }}>
-                Tip: use 3–10 words describing the legal topic, not a full sentence
+                {isSemanticMode
+                  ? "Съвет: опишете казуса с ваши думи — повече контекст подобрява резултатите"
+                  : "Съвет: въведете точни правни термини, членове или специфични изрази"}
               </Typography>
             )}
           </Box>
@@ -131,7 +90,7 @@ export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Pro
             <Button
               type="submit"
               variant="contained"
-              disabled={isLoading || !query.trim() || isOverLimit}
+              disabled={isLoading || !query.trim()}
               sx={{ whiteSpace: "nowrap", minWidth: 100 }}
             >
               {isLoading ? "Searching…" : "Search"}

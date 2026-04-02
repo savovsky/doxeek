@@ -147,6 +147,65 @@ Rate ALL ${candidates.length} chunks. Be strict — only rate 7+ if the chunk ge
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Reciprocal Rank Fusion ───────────────────────────────────────────────────
+// Merges a vector-ranked list and a keyword-ranked list into a single ranked
+// list. Deduplicates at the decision level (by actId). Items appearing in both
+// lists get a combined score; items in only one list get a single-source score.
+// Higher RRF score = more relevant.
+
+const RRF_K = 60; // Standard RRF dampening constant
+
+interface RankedItem {
+  ragKey:     string;
+  actId:      string;
+  chunkText:  string;
+  actTitle:   string;
+  actUrl:     string;
+  actDate:    string;
+  actNumber:  string;
+  caseNumber: string;
+  caseYear:   string;
+  department: string;
+  chunkIndex: number;
+  score:      number | null;
+}
+
+function reciprocalRankFusion(
+  vectorResults:  RankedItem[],
+  keywordResults: RankedItem[],
+): (RankedItem & { rrfScore: number })[] {
+  const scoreMap = new Map<string, { item: RankedItem; rrfScore: number }>();
+
+  // Vector results are already deduplicated (one chunk per decision).
+  vectorResults.forEach((item, rank) => {
+    const existing     = scoreMap.get(item.actId);
+    const contribution = 1 / (RRF_K + rank + 1); // rank is 0-based; RRF uses 1-based
+    if (existing) {
+      existing.rrfScore += contribution;
+    } else {
+      scoreMap.set(item.actId, { item, rrfScore: contribution });
+    }
+  });
+
+  // Keyword results may have multiple chunks per decision — each boosts the score,
+  // which correctly signals that this decision is highly relevant.
+  keywordResults.forEach((item, rank) => {
+    const existing     = scoreMap.get(item.actId);
+    const contribution = 1 / (RRF_K + rank + 1);
+    if (existing) {
+      existing.rrfScore += contribution;
+    } else {
+      scoreMap.set(item.actId, { item, rrfScore: contribution });
+    }
+  });
+
+  return [...scoreMap.values()]
+    .sort((a, b) => b.rrfScore - a.rrfScore)
+    .map(({ item, rrfScore }) => ({ ...item, rrfScore }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const searchDecisions = action({
   args: {
     query:       v.string(),
@@ -158,6 +217,9 @@ export const searchDecisions = action({
     // sectionType REMOVED
   },
   handler: async (ctx, args): Promise<DecisionResult[]> => {
+    const requestedLimit = args.limit ?? 10;
+
+    // ── Step 1: Build RAG filters ─────────────────────────────────────────
     const filters: EntryFilter<VksFilterTypes>[] = [];
     if (args.department) filters.push({ name: "department" as const, value: args.department });
     // actYear is intentionally NOT added to RAG-level filters.
@@ -165,69 +227,86 @@ export const searchDecisions = action({
     // so the RAG index silently drops them when the filter is applied.
     // We post-filter reliably by actDate from our own vksChunkMetadata table instead.
 
-    // ── Step 1: Wide vector retrieval ──────────────────────────────────────
-    // Cast a much wider net than the final result count so the LLM re-ranker
-    // has a good pool of candidates. Lower threshold = more recall.
-    const requestedLimit = args.limit ?? 10;
+    // ── Step 2: Parallel retrieval (vector + keyword) ─────────────────────
+    // Vector and keyword search run concurrently; BM25 finishes long before
+    // Cohere embedding completes, so Promise.all adds near-zero latency.
     const retrievalLimit = args.actYear
-      ? Math.min(requestedLimit * 10, 200)  // extra margin: many cross-year results get post-filtered
+      ? Math.min(requestedLimit * 10, 200) // extra margin: many cross-year results get post-filtered
       : Math.min(requestedLimit * 5,  100);
 
-    const { results, entries } = await rag.search(ctx, {
-      namespace:            args.namespace ?? "vks-commercial",
-      query:                args.query,
-      limit:                retrievalLimit,
-      vectorScoreThreshold: args.vectorScoreThreshold ?? 0.3,  // S18: wider net (was 0.4)
-      ...(filters.length > 0 ? { filters } : {}),
-    });
-
-    // ── Step 2: Look up metadata ────────────────────────────────────────────
-    const ragKeys = entries
-      .map((e) => e.key)
-      .filter((k): k is string => Boolean(k));
-
-    const metadataMap: Record<string, MetadataRow> = await ctx.runQuery(
-      internal.vksSearchQueries.getMetadataByKeys,
-      { ragKeys },
-    );
-
-    // ── Step 3: Join + deduplicate + post-filter ────────────────────────────
-    // Keep only the highest-scoring chunk per decision; apply year post-filter.
-    const seen = new Set<string>();
-    const candidates = results
-      .map((result) => {
-        const entry    = entries.find((e) => e.entryId === result.entryId);
-        const ragKey   = entry?.key ?? "";
-        const metadata = metadataMap[ragKey];
-        return {
-          vectorScore: result.score,
-          chunkText:   result.content.map((c) => c.text).join("\n"),
-          ragKey,
-          actId:       metadata?.actId      ?? "",
-          actTitle:    metadata?.actTitle    ?? "",
-          actUrl:      metadata?.actUrl      ?? "",
-          actDate:     metadata?.actDate     ?? "",
-          actNumber:   metadata?.actNumber   ?? "",
-          caseNumber:  metadata?.caseNumber  ?? "",
-          caseYear:    metadata?.caseYear    ?? "",
-          department:  metadata?.department  ?? "",
-          chunkIndex:  metadata?.chunkIndex  ?? 0,
-        };
-      })
-      .filter((r) => {
-        if (!r.actId) return false;                                          // no metadata → stale vector
-        if (args.actYear && !r.actDate.startsWith(args.actYear)) return false; // reliable year post-filter
-        if (seen.has(r.actId)) return false;                                 // deduplicate by decision
-        seen.add(r.actId);
-        return true;
+    // Inner helper: RAG vector search + metadata lookup + dedup + year post-filter.
+    const getVectorCandidates = async (): Promise<RankedItem[]> => {
+      const { results, entries } = await rag.search(ctx, {
+        namespace:            args.namespace ?? "vks-commercial",
+        query:                args.query,
+        limit:                retrievalLimit,
+        vectorScoreThreshold: args.vectorScoreThreshold ?? 0.3, // wider net than S18's 0.4
+        ...(filters.length > 0 ? { filters } : {}),
       });
 
-    if (candidates.length === 0) return [];
+      const ragKeys = entries
+        .map((e) => e.key)
+        .filter((k): k is string => Boolean(k));
 
-    // ── Step 4: LLM re-ranking ──────────────────────────────────────────────
-    // Send the top 20 unique decisions to GPT-4o-mini for relevance scoring.
+      const metadataMap: Record<string, MetadataRow> = await ctx.runQuery(
+        internal.vksSearchQueries.getMetadataByKeys,
+        { ragKeys },
+      );
+
+      // Keep only the highest-scoring chunk per decision; apply year post-filter.
+      const seen = new Set<string>();
+      return results
+        .map((result) => {
+          const entry    = entries.find((e) => e.entryId === result.entryId);
+          const ragKey   = entry?.key ?? "";
+          const metadata = metadataMap[ragKey];
+          return {
+            score:      result.score,
+            chunkText:  result.content.map((c) => c.text).join("\n"),
+            ragKey,
+            actId:      metadata?.actId      ?? "",
+            actTitle:   metadata?.actTitle    ?? "",
+            actUrl:     metadata?.actUrl      ?? "",
+            actDate:    metadata?.actDate     ?? "",
+            actNumber:  metadata?.actNumber   ?? "",
+            caseNumber: metadata?.caseNumber  ?? "",
+            caseYear:   metadata?.caseYear    ?? "",
+            department: metadata?.department  ?? "",
+            chunkIndex: metadata?.chunkIndex  ?? 0,
+          };
+        })
+        .filter((r) => {
+          if (!r.actId) return false;                                           // no metadata → stale vector
+          if (args.actYear && !r.actDate.startsWith(args.actYear)) return false; // reliable year post-filter
+          if (seen.has(r.actId)) return false;                                  // deduplicate by decision
+          seen.add(r.actId);
+          return true;
+        });
+    };
+
+    const [vectorCandidates, keywordCandidates] = await Promise.all([
+      getVectorCandidates(),
+      // Keyword search applies actYear filter natively inside the BM25 index —
+      // no post-filter needed. Fetch 30 chunks; RRF deduplicates by actId.
+      ctx.runQuery(api.vksSearchQueries.keywordSearchDecisions, {
+        query:      args.query,
+        department: args.department,
+        actYear:    args.actYear,
+        limit:      30,
+      }),
+    ]);
+
+    // ── Step 3: Merge with Reciprocal Rank Fusion ─────────────────────────
+    // Decisions appearing in both lists get a combined RRF score; decisions
+    // found by only one method still enter the pool (graceful degradation).
+    const merged = reciprocalRankFusion(vectorCandidates, keywordCandidates);
+
+    if (merged.length === 0) return [];
+
+    // ── Step 4: LLM re-ranking ─────────────────────────────────────────────
+    // Send the top 20 merged decisions to GPT-4o-mini for relevance scoring.
     // Cap at 20 to keep LLM cost (~$0.001/query) and latency (~2s) predictable.
-    const rerankInput = candidates.slice(0, 20).map((c) => ({
+    const rerankInput = merged.slice(0, 20).map((c) => ({
       ragKey:    c.ragKey,
       chunkText: c.chunkText,
       actTitle:  c.actTitle,
@@ -236,19 +315,19 @@ export const searchDecisions = action({
 
     const reranked = await rerankWithLLM(args.query, rerankInput);
 
-    // ── Step 5: Filter + sort by LLM score ─────────────────────────────────
-    // Only surface decisions the LLM rated ≥ 7/10 (genuinely relevant).
-    // Normalize score to 0–1 so the existing ResultCard badge (e.g. "90%")
+    // ── Step 5: Filter + sort by LLM score ────────────────────────────────
+    // Only surface decisions the LLM rated ≥ 7.5/10 (genuinely relevant).
+    // Normalise score to 0–1 so the existing ResultCard badge (e.g. "90%")
     // continues to work without any UI changes.
-    const RERANK_THRESHOLD = 7.5;  // S18: raised from 7 → 7.5 to cut borderline false positives
+    const RERANK_THRESHOLD = 7.5; // raised from 7 → 7.5 in S18 to cut borderline false positives
     const rerankedMap = new Map(reranked.map((r) => [r.ragKey, r.relevanceScore]));
 
-    return candidates
-      .filter((c)    => (rerankedMap.get(c.ragKey) ?? 0) >= RERANK_THRESHOLD)
-      .sort((a, b)   => (rerankedMap.get(b.ragKey) ?? 0) - (rerankedMap.get(a.ragKey) ?? 0))
+    return merged
+      .filter((c)  => (rerankedMap.get(c.ragKey) ?? 0) >= RERANK_THRESHOLD)
+      .sort((a, b) => (rerankedMap.get(b.ragKey) ?? 0) - (rerankedMap.get(a.ragKey) ?? 0))
       .slice(0, requestedLimit)
       .map((c) => ({
-        score:      (rerankedMap.get(c.ragKey) ?? 0) / 10,  // 0–10 → 0–1 for % badge
+        score:      (rerankedMap.get(c.ragKey) ?? 0) / 10, // 0–10 → 0–1 for % badge
         chunkText:  c.chunkText,
         ragKey:     c.ragKey,
         actId:      c.actId,
