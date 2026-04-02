@@ -14,6 +14,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ai-sdk/cohere": "^3.0.27",
     "@ai-sdk/openai": "^3.0.49",
     "@convex-dev/auth": "^0.0.91",
     "@convex-dev/rag": "^0.7.2",

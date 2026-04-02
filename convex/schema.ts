@@ -35,4 +35,14 @@ export default defineSchema({
       searchField:  "text",
       filterFields: ["department", "actYear"],
     }),
+
+  // Stores the original full text of each ingested decision (one row per decision).
+  // Used by the Decision Panel to display the complete document including header and footer.
+  // The actPlainText is stored unstripped — nothing is removed.
+  vksDecisions: defineTable({
+    actId:    v.string(),
+    actTitle: v.string(),
+    actUrl:   v.string(),
+    fullText: v.string(),   // original actPlainText — nothing stripped
+  }).index("by_actId", ["actId"]),
 });

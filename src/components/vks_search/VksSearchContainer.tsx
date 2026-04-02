@@ -75,6 +75,7 @@ export function VksSearchContainer() {
                 actTitle={selected.actTitle}
                 actUrl={selected.actUrl}
                 highlightRagKey={selected.ragKey}
+                matchedChunkText={selected.chunkText}
                 searchQuery={lastQuery}
                 searchMode={searchMode}
               />

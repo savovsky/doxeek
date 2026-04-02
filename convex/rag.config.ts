@@ -4,9 +4,14 @@
 //
 // CRITICAL: textEmbeddingModel + embeddingDimension must NEVER change after
 // first ingest. Changing either requires a full re-ingest.
+//
+// S16: Switched from OpenAI text-embedding-3-large (3072 dims) to Cohere
+// embed-multilingual-v3.0 (1024 dims). OpenAI embeddings produced 41–56%
+// scores on Bulgarian legal text with effectively random relevance.
+// Cohere is purpose-built for multilingual semantic similarity.
 
 import { RAG } from "@convex-dev/rag";
-import { openai } from "@ai-sdk/openai";
+import { cohere } from "@ai-sdk/cohere";
 import { components } from "./_generated/api";
 
 type VksFilterTypes = {
@@ -16,7 +21,7 @@ type VksFilterTypes = {
 };
 
 export const rag = new RAG<VksFilterTypes>(components.rag, {
-  textEmbeddingModel: openai.embedding("text-embedding-3-large"),  // S14: upgraded for better multilingual quality
-  embeddingDimension: 3072,                                          // S14: 3,072-dim model (within Convex 4,096 limit)
+  textEmbeddingModel: cohere.embedding("embed-multilingual-v3.0"),  // S16: Cohere multilingual, purpose-built for non-English
+  embeddingDimension: 1024,                                          // S16: Cohere v3 outputs 1024 dims
   filterNames: ["department", "actYear"],  // sectionType REMOVED
 });

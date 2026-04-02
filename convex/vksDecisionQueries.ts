@@ -16,3 +16,15 @@ export const getDecisionChunks = query({
     return chunks;
   },
 });
+
+// Returns the original full text (nothing stripped) for a single decision.
+// Used by the Decision Panel to display the complete document.
+export const getDecisionFullText = query({
+  args: { actId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("vksDecisions")
+      .withIndex("by_actId", (q) => q.eq("actId", args.actId))
+      .first();
+  },
+});

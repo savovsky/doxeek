@@ -1,6 +1,6 @@
 // convex/vksSearch.ts
 // Public search action — called from the React UI via useAction().
-// "use node" required because rag.search() calls OpenAI for query embedding.
+// "use node" required because rag.search() calls Cohere for query embedding (S16).
 "use node";
 
 import { action } from "./_generated/server";
@@ -115,7 +115,7 @@ export const searchDecisions = action({
       namespace:            args.namespace ?? "vks-commercial",
       query:                args.query,
       limit:                internalLimit,
-      vectorScoreThreshold: args.vectorScoreThreshold ?? 0.4, // confirmed at 100-decision scale (S12): results score 50-71%, no good results cut off
+      vectorScoreThreshold: args.vectorScoreThreshold ?? 0.4, // S17: unchanged from S16 — score distribution identical (55–67%), boilerplate at 61–63% not fixable by threshold alone. S18 will lower to 0.3 for wider re-ranking net.
       ...(filters.length > 0 ? { filters } : {}),
     });
 

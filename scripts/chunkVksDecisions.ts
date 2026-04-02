@@ -155,22 +155,22 @@ import * as rl   from 'readline';
  * Paragraphs shorter than this are merged into the previous (or next) paragraph
  * rather than emitted as standalone chunks.
  */
-const MIN_MERGE_SIZE = 150;
+const MIN_MERGE_SIZE = 200;
 
 /**
  * Maximum character length for a single chunk.
- * Smaller chunks produce sharper, more distinctive embeddings — one concept per chunk.
+ * Larger chunks (S17) keep complete legal thoughts together for better embeddings.
  * Paragraphs longer than this are split at sentence boundaries.
  */
-const MAX_CHUNK_SIZE = 500;
+const MAX_CHUNK_SIZE = 1200;
 
 /**
  * Number of sentences carried over from the end of one sub-chunk to the
  * beginning of the next when splitting an oversized paragraph.
- * Set to 0 — overlap pollutes a chunk's embedding with the adjacent chunk's topic,
- * reducing vector search discrimination.
+ * 2 sentences of overlap give each sub-chunk enough context to be independently
+ * meaningful when split across a long paragraph.
  */
-const OVERLAP_SENTENCES = 0;
+const OVERLAP_SENTENCES = 2;
 
 // ============================================================================
 // TYPES
@@ -203,6 +203,7 @@ interface ChunkMetadata {
   caseYear:   string;
   department: string;
   chunkIndex: number;         // 0-based sequential position within this decision
+  fullText?:  string;         // original actPlainText (nothing stripped) — only on chunk 0
 }
 
 /** One output chunk — maps directly to one rag.add() call. */
@@ -217,6 +218,7 @@ interface Stats {
   parseErrors:       number;
   totalChunks:       number;
   noFooter:          number;   // footer signature not found — text ran to end
+  noHeader:          number;   // header pattern not found — full text kept unchanged
   oversizedSplits:   number;
   chunksPerDecision: number[];
 }
@@ -235,6 +237,36 @@ function toISODate(dateBG: string): string {
   const m = dateBG.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   if (!m) return dateBG;
   return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+// ============================================================================
+// HEADER STRIPPING
+// ============================================================================
+
+/**
+ * Strips the boilerplate court composition header from the top of a decision.
+ *
+ * Strategy: find the line containing "изслуша докладваното от съдия ..." which
+ * always marks the end of the header block. Discard everything up to and
+ * including that line — the substantive content follows immediately after.
+ *
+ * The search is limited to the first 15 paragraphs. If not found there,
+ * the full text is kept unchanged (avoids stripping substantive content).
+ */
+function stripHeader(text: string): { text: string; headerFound: boolean } {
+  const paragraphs = text.split('\n\n');
+  const searchLimit = Math.min(paragraphs.length, 20);
+
+  for (let i = 0; i < searchLimit; i++) {
+    if (/(?:изслуша|разгледа)\s+докладваното\s+от/i.test(paragraphs[i])) {
+      return {
+        text: paragraphs.slice(i + 1).join('\n\n').trimStart(),
+        headerFound: true,
+      };
+    }
+  }
+
+  return { text, headerFound: false };
 }
 
 // ============================================================================
@@ -431,10 +463,14 @@ function mergeParagraphs(paragraphs: string[]): string[] {
  */
 function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
   // ── Step 1: Strip footer ──────────────────────────────────────────────────
-  const { text: cleanText, footerFound } = stripFooter(record.actPlainText);
+  const { text: noFooter, footerFound } = stripFooter(record.actPlainText);
   if (!footerFound) statsRef.noFooter++;
 
-  // ── Step 2: Split into paragraphs ─────────────────────────────────────────
+  // ── Step 2: Strip header ──────────────────────────────────────────────────
+  const { text: cleanText, headerFound } = stripHeader(noFooter);
+  if (!headerFound) statsRef.noHeader++;
+
+  // ── Step 3: Split into paragraphs ─────────────────────────────────────────
   const rawParagraphs = cleanText
     .split('\n\n')
     .map(p => p.trim())
@@ -461,10 +497,10 @@ function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
     return chunks;
   }
 
-  // ── Step 3: Merge pass — short paragraphs (<150 chars) ───────────────────
+  // ── Step 4: Merge pass — short paragraphs (<200 chars) ───────────────────
   const merged = mergeParagraphs(rawParagraphs);
 
-  // ── Step 4: Split pass — oversized paragraphs (>1,400 chars) ─────────────
+  // ── Step 5: Split pass — oversized paragraphs (>1,200 chars) ────────────
   const chunkTexts: string[] = [];
   for (const paragraph of merged) {
     if (paragraph.length <= MAX_CHUNK_SIZE) {
@@ -475,7 +511,7 @@ function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
     }
   }
 
-  // ── Step 5 & 6: Assign chunkIndex — actTitle in metadata only, NOT embedded ──
+  // ── Step 6 & 7: Assign chunkIndex — actTitle in metadata only, NOT embedded ──
   // actTitle is stored in metadata for display purposes but must not be prepended
   // to the chunk text. Including it in the embedding dilutes the chunk's topic
   // signal with case-identity noise, reducing vector search discrimination.
@@ -493,7 +529,12 @@ function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
 
   const chunks: Chunk[] = chunkTexts.map((text, i) => ({
     text,                                    // actTitle NOT prepended — metadata only
-    metadata: { ...baseMeta, chunkIndex: i },
+    metadata: {
+      ...baseMeta,
+      chunkIndex: i,
+      // fullText: original unstripped actPlainText — only on chunk 0, for Decision Panel
+      ...(i === 0 ? { fullText: record.actPlainText } : {}),
+    },
   }));
 
   statsRef.totalChunks += chunks.length;
@@ -524,7 +565,9 @@ function printStats(stats: Stats): void {
   }
   console.log(`Total chunks         :  ${stats.totalChunks.toLocaleString()}`);
   console.log('');
-  console.log('Footer stats:');
+  console.log('Header / footer stats:');
+  console.log(`  Header stripped (pattern found)    : ${stats.decisions - stats.noHeader}`);
+  console.log(`  Header not found (text kept as-is) : ${stats.noHeader}`);
   console.log(`  Footer not found (text ran to end) : ${stats.noFooter}`);
   console.log('');
   console.log(`Oversized paragraphs split           : ${stats.oversizedSplits}`);
@@ -602,6 +645,7 @@ async function main(): Promise<void> {
     parseErrors:       0,
     totalChunks:       0,
     noFooter:          0,
+    noHeader:          0,
     oversizedSplits:   0,
     chunksPerDecision: [],
   };

@@ -19,6 +19,7 @@ const chunkValidator = v.object({
     caseYear:    v.string(),
     department:  v.string(),
     chunkIndex:  v.number(),
+    fullText:    v.optional(v.string()),   // S17: original actPlainText, only on chunk 0
     // sectionType REMOVED
   }),
 });
@@ -34,7 +35,7 @@ export const ingestBatch = internalAction({
     for (const chunk of args.chunks) {
       const {
         actId, actNumber, actDate, actTitle, actUrl,
-        caseNumber, caseYear, department, chunkIndex,
+        caseNumber, caseYear, department, chunkIndex, fullText,
       } = chunk.metadata;
 
       const ragKey = `${actId}_${chunkIndex}`;
@@ -58,6 +59,7 @@ export const ingestBatch = internalAction({
         actYear: actDate.slice(0, 4), // NEW
         chunkIndex,
         text: chunk.text,
+        fullText,   // S17: only present on chunk 0
         // sectionType REMOVED
       });
 
