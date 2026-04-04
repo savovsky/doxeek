@@ -63,10 +63,15 @@
 //      Safe to run multiple times — re-running without --resume starts fresh.
 //
 //   6. STOP CONDITION
-//      The loop stops automatically when MAX_CONSECUTIVE_EMPTY_NUMBERS (5)
+//      The loop stops automatically when MAX_CONSECUTIVE_EMPTY_NUMBERS (50)
 //      consecutive un0_Numbers return zero results. This reliably signals the
 //      end of the indexed range without needing to know the total count upfront.
-//      The --limit flag is a hard upper bound on un0_Number, not on total decisions.
+//      The threshold is 50 (not 5) because the VKS numbering has natural gaps
+//      larger than 5 — e.g. voided or unassigned numbers in a block — which
+//      caused premature termination with a smaller threshold.
+//      The --limit flag is an optional hard upper bound on un0_Number (defaults to
+//      no limit). Omit it for a full collection — the consecutive-empty stop
+//      condition is the primary termination mechanism.
 //
 //   7. DUPLICATE DETECTION
 //      Each actId is a 32-character hex Domino UNID — globally unique per decision.
@@ -76,15 +81,15 @@
 //
 // USAGE (run from project root: cd C:\work\personal\projects\doxeek)
 //   # Test run (small batch first — verify output before going full scale)
-//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 10
-//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil --limit 10
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 10 --verbose
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil --limit 10 --verbose
 //
-//   # Full collection
-//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 5000
-//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil --limit 5000
+//   # Full collection (no --limit needed — stops automatically when no more results)
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil
 //
 //   # Resume an interrupted run
-//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --resume --limit 5000
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --resume
 //
 //   # Verbose output (prints per-result detail and parse warnings)
 //   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 10 --verbose
@@ -143,7 +148,9 @@ interface IActsLinksData {
 }
 
 interface CLIOptions {
-  limit: number;      // max un0_Number to query (NOT max total decisions — one number returns ~30)
+  limit: number;      // max un0_Number to query — defaults to Number.MAX_SAFE_INTEGER (no limit)
+                      // the auto-stop condition (consecutive empty numbers) is the primary
+                      // termination mechanism; --limit is only needed for test runs
   resume: boolean;    // load existing data and continue from the last processed number
   verbose: boolean;   // print extra per-result detail and parse warnings
   department: string; // "commercial" or "civil" — required, no default
@@ -509,7 +516,7 @@ export const ${cliOptions.department}DecisionsLinksList = {
 function parseCLIArgs(): CLIOptions {
   const args = process.argv.slice(2);
   const options: CLIOptions = {
-    limit: 2000,
+    limit: Number.MAX_SAFE_INTEGER, // no limit by default — auto-stop handles termination
     resume: false,
     verbose: false,
     department: '',
@@ -518,7 +525,7 @@ function parseCLIArgs(): CLIOptions {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--limit' && i + 1 < args.length) {
-      options.limit = parseInt(args[i + 1], 10) || 2000;
+      options.limit = parseInt(args[i + 1], 10) || Number.MAX_SAFE_INTEGER;
       i++;
     } else if (arg === '--resume') {
       options.resume = true;
@@ -538,15 +545,15 @@ function validateCLIOptions(options: CLIOptions): void {
   if (!options.department || !['commercial', 'civil'].includes(options.department)) {
     console.log('❌ --department flag is required and must be "commercial" or "civil"');
     console.log('\nUsage:');
-    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 1000');
-    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil --limit 1000');
-    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --resume --limit 5000');
-    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 1000 --verbose');
+    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial');
+    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil');
+    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --resume');
+    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 10 --verbose  (test run)');
     process.exit(1);
   }
 
   if (options.limit <= 0) {
-    console.log('❌ --limit must be greater than 0');
+    console.log('❌ --limit must be greater than 0 (omit the flag entirely to collect all available)');
     process.exit(1);
   }
 }
@@ -614,7 +621,10 @@ async function collectLinks(): Promise<void> {
   let duplicatesOnNumber = 0;
   let failedToParseOnNumber = 0;
   let consecutiveEmptyNumbers = 0;
-  const MAX_CONSECUTIVE_EMPTY_NUMBERS = 5; // Stop after 5 consecutive numbers with 0 results
+  const MAX_CONSECUTIVE_EMPTY_NUMBERS = 50; // Stop after 50 consecutive numbers with 0 results
+                                              // NOTE: 5 was too small — the VKS numbering has natural
+                                              // gaps (voided/unassigned numbers) larger than 5 in places,
+                                              // causing premature termination before the indexed range ends.
 
   while (un0Number <= cliOptions.limit && consecutiveEmptyNumbers < MAX_CONSECUTIVE_EMPTY_NUMBERS) {
     log(`Fetching document number ${un0Number} (Start=1)...`);
@@ -710,7 +720,7 @@ async function collectLinks(): Promise<void> {
     saveMetadata(data);
 
     if (un0Number >= cliOptions.limit) {
-      log(`✅ Reached document number limit: ${cliOptions.limit}`);
+      log(`✅ Reached document number limit: ${cliOptions.limit === Number.MAX_SAFE_INTEGER ? 'none' : cliOptions.limit}`);
       break;
     }
 
