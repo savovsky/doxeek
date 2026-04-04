@@ -276,7 +276,8 @@ class DecisionValidator {
       issues.push(`No Cyrillic text detected - possible encoding error`);
     }
 
-    if (/<[^>]+>/.test(content) || /face=|align=|size=/.test(content)) {
+    const HTML_TAG_RE = /<\/?\s*(div|span|p|br|font|table|tr|td|th|a|b|i|u|em|strong|img|script|style|link|head|body|html|form|input|select|option|textarea|button|h[1-6]|ul|ol|li|dl|dt|dd|blockquote|pre|code|hr|meta|title|header|footer|nav|section|article|aside|main|figure|figcaption|caption|col|colgroup|thead|tbody|tfoot)\b[^>]*>/i;
+    if (HTML_TAG_RE.test(content) || /face=|align=|size=/.test(content)) {
       issues.push(`HTML artifacts found in cleaned content`);
     }
 
@@ -522,26 +523,45 @@ async function fetchDecision(url: string): Promise<string> {
  *   structure has changed several times. We try patterns in order of likelihood
  *   and return the first match that contains enough content (> 500 chars).
  */
+/**
+ * Strips HTML tags and entities to measure actual text content length.
+ * Used by extractContentFromHtml to decide whether a pattern match contains
+ * enough real text (not just HTML markup) to be accepted.
+ */
+function stripHtmlForLengthCheck(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function extractContentFromHtml(html: string): string | null {
+  const minTextLen = CONFIG.VALIDATION_MIN_CONTENT_LENGTH; // 1000 — same as validation
+
   // Pattern 1: Most common layout — decision body inside <font size="4">
   let match = html.match(/<font size="4"([\s\S]*?)<\/div><\/td><\/tr>\s*<\/table>/);
-  if (match && match[1].length > 500) return match[1];
+  if (match && stripHtmlForLengthCheck(match[1]).length > minTextLen) return match[1];
 
   // Pattern 2: Variation with different <font> attribute quoting
   match = html.match(/<font[^>]*size="?4"?[^>]*>([\s\S]*?)<\/font>\s*<\/div>/i);
-  if (match && match[1].length > 500) return match[1];
+  if (match && stripHtmlForLengthCheck(match[1]).length > minTextLen) return match[1];
 
   // Pattern 3: Older decisions stored in <pre> tags
   match = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-  if (match && match[1].length > 500) return match[1];
+  if (match && stripHtmlForLengthCheck(match[1]).length > minTextLen) return match[1];
 
   // Pattern 4: Layout variant using a table cell with colspan="2"
   match = html.match(/<td[^>]*colspan="2"[^>]*>([\s\S]*?)<\/td>\s*<\/tr>\s*<\/table>/i);
-  if (match && match[1].length > 500) return match[1];
+  if (match && stripHtmlForLengthCheck(match[1]).length > minTextLen) return match[1];
 
   // Pattern 5: Content in a <textarea> field (rare)
   match = html.match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/i);
-  if (match && match[1].length > 500) return match[1];
+  if (match && stripHtmlForLengthCheck(match[1]).length > minTextLen) return match[1];
 
   // Pattern 6: Full <body> fallback
   match = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
@@ -734,10 +754,26 @@ function cleanContent(rawHtml: string): string {
   // ── Step 3: Split and normalize inline whitespace ─────────────────────────
   const allLines = text.split('\n').map(normalizeInlineSpaces);
 
-  // ── Step 4: Find РЕШЕНИЕ title line; discard everything before it ──────────
-  const TITLE_RE = /^Р\s+Е\s+Ш\s+Е\s+Н\s+И\s+Е\s*$/;
-  let titleIdx = allLines.findIndex((l) => TITLE_RE.test(l));
+  // ── Step 4: Find decision/order title line; discard everything before it ──
+  //   Handles: letter-spaced "Р Е Ш Е Н И Е", non-spaced "РЕШЕНИЕ",
+  //            letter-spaced "О П Р Е Д Е Л Е Н И Е", non-spaced "ОПРЕДЕЛЕНИЕ"
+  const TITLE_SPACED_RE      = /^Р\s+Е\s+Ш\s+Е\s+Н\s+И\s+Е\s*$/;
+  const TITLE_NONSPACED_RE   = /^РЕШЕНИЕ\s*$/;
+  const ORDER_SPACED_RE      = /^О\s+П\s+Р\s+Е\s+Д\s+Е\s+Л\s+Е\s+Н\s+И\s+Е\s*$/;
+  const ORDER_NONSPACED_RE   = /^ОПРЕДЕЛЕНИЕ\s*$/;
+
+  let titleIdx = allLines.findIndex((l) => TITLE_SPACED_RE.test(l));
   if (titleIdx === -1) {
+    titleIdx = allLines.findIndex((l) => TITLE_NONSPACED_RE.test(l));
+  }
+  if (titleIdx === -1) {
+    titleIdx = allLines.findIndex((l) => ORDER_SPACED_RE.test(l));
+  }
+  if (titleIdx === -1) {
+    titleIdx = allLines.findIndex((l) => ORDER_NONSPACED_RE.test(l));
+  }
+  if (titleIdx === -1) {
+    // Fallback: embedded (not standalone) letter-spaced РЕШЕНИЕ
     titleIdx = allLines.findIndex((l) => /Р\s+Е\s+Ш\s+Е\s+Н\s+И\s+Е/.test(l));
   }
   const relevantLines = titleIdx >= 0 ? allLines.slice(titleIdx) : allLines;
