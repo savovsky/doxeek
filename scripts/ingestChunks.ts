@@ -28,7 +28,7 @@ const flag = (name: string): string | undefined => {
 };
 
 const inputPath = flag("--input");
-const namespace = flag("--namespace") ?? "vks-commercial";
+const namespace = flag("--namespace") ?? "vks";
 const batchSize = parseInt(flag("--batch-size") ?? "25", 10);
 const limit     = parseInt(flag("--limit") ?? "0", 10);
 const skip      = parseInt(flag("--skip") ?? "0", 10);   // skip first N chunks (for resuming)
@@ -53,7 +53,6 @@ if (!dryRun && !convexUrl) {
 
 interface ChunkMetadata {
   actId:       string;
-  actNumber:   string;
   actDate:     string;
   actTitle:    string;
   actUrl:      string;
@@ -61,7 +60,7 @@ interface ChunkMetadata {
   caseYear:    string;
   department:  string;
   chunkIndex:  number;
-  // sectionType REMOVED in S9
+  // actNumber REMOVED (S22)
 }
 interface Chunk {
   text:     string;

@@ -178,9 +178,7 @@ const OVERLAP_SENTENCES = 2;
 
 /** One record from the input JSONL (produced by scraperVksDecisions.ts). */
 interface InputRecord {
-  actType:      string;
   actId:        string;
-  actNumber:    string;
   actDate:      string;        // "DD.MM.YYYY" — Bulgarian format
   actTitle:     string;
   actUrl:       string;
@@ -188,14 +186,12 @@ interface InputRecord {
   caseYear:     string;
   department:   string;
   actPlainText: string;
-  validation:   { isValid: boolean; contentHash: string; wordCount: number };
-  processedAt:  string;
+  // REMOVED (S22): actNumber, actType, validation, processedAt
 }
 
 /** Metadata attached to every output chunk. */
 interface ChunkMetadata {
   actId:      string;
-  actNumber:  string;
   actDate:    string;         // ISO 8601 "YYYY-MM-DD"
   actTitle:   string;
   actUrl:     string;
@@ -204,6 +200,7 @@ interface ChunkMetadata {
   department: string;
   chunkIndex: number;         // 0-based sequential position within this decision
   fullText?:  string;         // original actPlainText (nothing stripped) — only on chunk 0
+  // actNumber REMOVED (S22)
 }
 
 /** One output chunk — maps directly to one rag.add() call. */
@@ -482,7 +479,6 @@ function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
       text: record.actTitle,
       metadata: {
         actId:      record.actId,
-        actNumber:  record.actNumber,
         actDate:    toISODate(record.actDate),
         actTitle:   record.actTitle,
         actUrl:     record.actUrl,
@@ -518,13 +514,13 @@ function chunkDecision(record: InputRecord, statsRef: Stats): Chunk[] {
   const isoDate  = toISODate(record.actDate);
   const baseMeta = {
     actId:      record.actId,
-    actNumber:  record.actNumber,
     actDate:    isoDate,
     actTitle:   record.actTitle,
     actUrl:     record.actUrl,
     caseNumber: record.caseNumber,
     caseYear:   record.caseYear,
     department: record.department,
+    // actNumber REMOVED (S22)
   };
 
   const chunks: Chunk[] = chunkTexts.map((text, i) => ({

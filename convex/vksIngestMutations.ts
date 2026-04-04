@@ -6,24 +6,23 @@ import { v } from "convex/values";
 
 export const storeChunkMetadata = internalMutation({
   args: {
-    ragKey:      v.string(),
-    actId:       v.string(),
-    actNumber:   v.string(),
-    actDate:     v.string(),
-    actTitle:    v.string(),
-    actUrl:      v.string(),
-    caseNumber:  v.string(),
-    caseYear:    v.string(),
-    department:  v.string(),
-    actYear:     v.optional(v.string()),   // NEW: "2016" — needed for searchIndex filterField
-    chunkIndex:  v.number(),
-    text:        v.string(),
-    fullText:    v.optional(v.string()),   // S17: original actPlainText, only present on chunk 0
-    // sectionType REMOVED
+    ragKey:     v.string(),
+    actId:      v.string(),
+    actDate:    v.string(),
+    actTitle:   v.string(),
+    actUrl:     v.string(),
+    caseNumber: v.string(),
+    caseYear:   v.string(),
+    department: v.string(),
+    actYear:    v.string(),   // required (fresh start)
+    chunkIndex: v.number(),
+    text:       v.string(),
+    storageId:  v.optional(v.id("_storage")),  // Id<"_storage"> | undefined — only on chunk 0
+    // actNumber REMOVED (S22)
   },
   handler: async (ctx, args) => {
-    // Destructure fullText out — it lives in vksDecisions, not vksChunkMetadata
-    const { fullText, ...chunkMeta } = args;
+    // Destructure fields that don't belong in vksChunkMetadata
+    const { storageId, caseNumber, caseYear, ...chunkMeta } = args;
 
     const existing = await ctx.db
       .query("vksChunkMetadata")
@@ -31,33 +30,35 @@ export const storeChunkMetadata = internalMutation({
       .unique();
 
     if (existing) {
-      // Upsert — update existing row (backfills text on re-ingest)
       await ctx.db.patch(existing._id, chunkMeta);
     } else {
       await ctx.db.insert("vksChunkMetadata", chunkMeta);
     }
 
-    // When chunkIndex === 0, upsert the full decision text into vksDecisions.
-    // This stores the original unstripped actPlainText for the Decision Panel to display.
-    if (args.chunkIndex === 0 && args.fullText) {
+    // Upsert vksDecisions on chunk 0
+    if (args.chunkIndex === 0 && args.storageId) {
       const existingDecision = await ctx.db
         .query("vksDecisions")
         .withIndex("by_actId", (q) => q.eq("actId", args.actId))
         .first();
 
+      const decisionData = {
+        actTitle:   args.actTitle,
+        actUrl:     args.actUrl,
+        storageId:  args.storageId,
+        caseNumber: args.caseNumber,
+        caseYear:   args.caseYear,
+        actDate:    args.actDate,
+        department: args.department,
+      };
+
       if (existingDecision) {
-        await ctx.db.patch(existingDecision._id, {
-          actTitle: args.actTitle,
-          actUrl:   args.actUrl,
-          fullText: args.fullText,
-        });
+        // On re-ingest: delete the old blob before saving the new storageId.
+        // ctx.storage.delete() works in mutations (ID-based, no Blob upload).
+        await ctx.storage.delete(existingDecision.storageId);
+        await ctx.db.patch(existingDecision._id, decisionData);
       } else {
-        await ctx.db.insert("vksDecisions", {
-          actId:    args.actId,
-          actTitle: args.actTitle,
-          actUrl:   args.actUrl,
-          fullText: args.fullText,
-        });
+        await ctx.db.insert("vksDecisions", { actId: args.actId, ...decisionData });
       }
     }
   },

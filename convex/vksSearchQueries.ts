@@ -63,9 +63,6 @@ export const keywordSearchDecisions = query({
       actTitle:   row.actTitle,
       actUrl:     row.actUrl,
       actDate:    row.actDate,
-      actNumber:  row.actNumber,
-      caseNumber: row.caseNumber,
-      caseYear:   row.caseYear,
       department: row.department,
       chunkIndex: row.chunkIndex,
     }));

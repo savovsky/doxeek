@@ -1,8 +1,9 @@
-import { useEffect, useRef, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useQuery }           from "convex/react";
 import { api }                from "../../../convex/_generated/api";
 import type { SearchMode }    from "../../hooks/useVksSearch";
 import Box                    from "@mui/material/Box";
+import Chip                   from "@mui/material/Chip";
 import CircularProgress       from "@mui/material/CircularProgress";
 import Divider                from "@mui/material/Divider";
 import IconButton             from "@mui/material/IconButton";
@@ -101,13 +102,25 @@ export function DecisionPanel({
   const scrollRef  = useRef<HTMLDivElement | null>(null);
   const matchRef   = useRef<HTMLSpanElement | null>(null);
 
-  // Load the original full text from vksDecisions (stored unstripped at ingest)
+  // Load decision metadata + signed storage URL from vksDecisions
   const decision = useQuery(api.vksDecisionQueries.getDecisionFullText, { actId });
+
+  // Fetch the full text from Convex File Storage once the signed URL is available
+  const [fullText, setFullText] = useState<string | null>(null);
+  useEffect(() => {
+    if (!decision?.textUrl) { setFullText(null); return; }
+    let cancelled = false;
+    fetch(decision.textUrl)
+      .then(r => r.text())
+      .then(t  => { if (!cancelled) setFullText(t); })
+      .catch(()  => { if (!cancelled) setFullText(null); });
+    return () => { cancelled = true; };
+  }, [decision?.textUrl]);
 
   // Semantic mode: locate the matched chunk inside fullText
   const splitResult =
-    searchMode === "vector" && matchedChunkText && decision?.fullText
-      ? findChunkInFullText(decision.fullText, matchedChunkText)
+    searchMode === "vector" && matchedChunkText && fullText
+      ? findChunkInFullText(fullText, matchedChunkText)
       : null;
 
   // Scroll to the matched chunk span when it becomes available or selection changes
@@ -117,7 +130,7 @@ export function DecisionPanel({
     } else if (scrollRef.current) {
       scrollRef.current.scrollTop = 0;
     }
-  }, [actId, decision, splitResult]);
+  }, [actId, fullText, splitResult]);
 
   // ── Render full text content ─────────────────────────────────────────────
 
@@ -184,6 +197,21 @@ export function DecisionPanel({
         </IconButton>
       </Stack>
 
+      {/* Department chip + date — shown once decision metadata is loaded */}
+      {decision && (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2, pb: 1 }}>
+          <Chip
+            label={decision.department === "commercial" ? "Търговско" : "Гражданско"}
+            size="small"
+            variant="outlined"
+            color={decision.department === "commercial" ? "primary" : "secondary"}
+          />
+          <Typography variant="caption" color="text.secondary">
+            {decision.actDate}
+          </Typography>
+        </Stack>
+      )}
+
       <Divider />
 
       {/* Full decision text */}
@@ -193,12 +221,16 @@ export function DecisionPanel({
             <CircularProgress size={24} />
           </Box>
         ) : decision === null ? (
-          // Decision not yet in vksDecisions (ingested before S17) — show notice
           <Typography variant="body2" color="text.secondary" sx={{ fontStyle: "italic" }}>
             Full text not available for this decision. Please re-ingest to enable full-text view.
           </Typography>
+        ) : fullText === null ? (
+          // decision row found but text blob is still downloading
+          <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
+            <CircularProgress size={24} />
+          </Box>
         ) : (
-          renderContent(decision.fullText)
+          renderContent(fullText)
         )}
       </Box>
     </Box>

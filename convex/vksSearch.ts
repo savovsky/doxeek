@@ -26,12 +26,8 @@ type DecisionResult = {
   actTitle:   string;
   actUrl:     string;
   actDate:    string;
-  actNumber:  string;
-  caseNumber: string;
-  caseYear:   string;
   department: string;
   chunkIndex: number;
-  // sectionType REMOVED
 };
 
 type MetadataRow = {
@@ -40,12 +36,8 @@ type MetadataRow = {
   actTitle:   string;
   actUrl:     string;
   actDate:    string;
-  actNumber:  string;
-  caseNumber: string;
-  caseYear:   string;
   department: string;
   chunkIndex: number;
-  // sectionType REMOVED
 } | null;
 
 /**
@@ -57,10 +49,11 @@ type MetadataRow = {
  */
 export const keywordSearchDecisions = action({
   args: {
-    query:      v.string(),
-    department: v.optional(v.string()),
-    actYear:    v.optional(v.string()),
-    limit:      v.optional(v.number()),
+    query:       v.string(),
+    department:  v.optional(v.string()),
+    actYearFrom: v.optional(v.string()),   // range start (inclusive)
+    actYearTo:   v.optional(v.string()),   // range end   (inclusive)
+    limit:       v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<DecisionResult[]> => {
     const limit = args.limit ?? 20;
@@ -69,14 +62,30 @@ export const keywordSearchDecisions = action({
     // With ~20 chunks/decision on average, limit×10 gives a safe margin.
     const fetchLimit = Math.min(limit * 10, 200);
 
+    // BM25 index only supports exact-match year filter (not ranges).
+    // Pass actYear only when the caller wants a single exact year; otherwise
+    // fetch without year filter and post-filter on actDate below.
+    const exactYear = (args.actYearFrom && args.actYearFrom === args.actYearTo)
+      ? args.actYearFrom
+      : undefined;
+
     const rows = await ctx.runQuery(api.vksSearchQueries.keywordSearchDecisions, {
-      ...args,
-      limit: fetchLimit,
+      query:      args.query,
+      department: args.department,
+      actYear:    exactYear,
+      limit:      fetchLimit,
+    });
+
+    // Post-filter by date range (handles the non-exact-match case).
+    const filtered = rows.filter(row => {
+      if (args.actYearFrom && row.actDate < `${args.actYearFrom}-01-01`) return false;
+      if (args.actYearTo   && row.actDate > `${args.actYearTo}-12-31`)   return false;
+      return true;
     });
 
     // Deduplicate: keep only the first (best-ranked) chunk per decision.
     const seen = new Set<string>();
-    const deduped = rows.filter(row => {
+    const deduped = filtered.filter(row => {
       if (seen.has(row.actId)) return false;
       seen.add(row.actId);
       return true;
@@ -162,9 +171,6 @@ interface RankedItem {
   actTitle:   string;
   actUrl:     string;
   actDate:    string;
-  actNumber:  string;
-  caseNumber: string;
-  caseYear:   string;
   department: string;
   chunkIndex: number;
   score:      number | null;
@@ -211,7 +217,8 @@ export const searchDecisions = action({
     query:       v.string(),
     namespace:   v.optional(v.string()),
     department:  v.optional(v.string()),
-    actYear:     v.optional(v.string()),
+    actYearFrom: v.optional(v.string()),   // range start (inclusive)
+    actYearTo:   v.optional(v.string()),   // range end   (inclusive)
     limit:       v.optional(v.number()),
     vectorScoreThreshold: v.optional(v.number()),
     // sectionType REMOVED
@@ -230,14 +237,14 @@ export const searchDecisions = action({
     // ── Step 2: Parallel retrieval (vector + keyword) ─────────────────────
     // Vector and keyword search run concurrently; BM25 finishes long before
     // Cohere embedding completes, so Promise.all adds near-zero latency.
-    const retrievalLimit = args.actYear
+    const retrievalLimit = (args.actYearFrom || args.actYearTo)
       ? Math.min(requestedLimit * 10, 200) // extra margin: many cross-year results get post-filtered
       : Math.min(requestedLimit * 5,  100);
 
     // Inner helper: RAG vector search + metadata lookup + dedup + year post-filter.
     const getVectorCandidates = async (): Promise<RankedItem[]> => {
       const { results, entries } = await rag.search(ctx, {
-        namespace:            args.namespace ?? "vks-commercial",
+        namespace:            args.namespace ?? "vks",
         query:                args.query,
         limit:                retrievalLimit,
         vectorScoreThreshold: args.vectorScoreThreshold ?? 0.3, // wider net than S18's 0.4
@@ -268,33 +275,41 @@ export const searchDecisions = action({
             actTitle:   metadata?.actTitle    ?? "",
             actUrl:     metadata?.actUrl      ?? "",
             actDate:    metadata?.actDate     ?? "",
-            actNumber:  metadata?.actNumber   ?? "",
-            caseNumber: metadata?.caseNumber  ?? "",
-            caseYear:   metadata?.caseYear    ?? "",
             department: metadata?.department  ?? "",
             chunkIndex: metadata?.chunkIndex  ?? 0,
           };
         })
         .filter((r) => {
-          if (!r.actId) return false;                                           // no metadata → stale vector
-          if (args.actYear && !r.actDate.startsWith(args.actYear)) return false; // reliable year post-filter
-          if (seen.has(r.actId)) return false;                                  // deduplicate by decision
+          if (!r.actId) return false;                                                        // no metadata → stale vector
+          // TODO S27: re-enable RAG-level actYear filter when actYearFrom === actYearTo
+          if (args.actYearFrom && r.actDate < `${args.actYearFrom}-01-01`) return false;    // year range post-filter
+          if (args.actYearTo   && r.actDate > `${args.actYearTo}-12-31`)   return false;    // year range post-filter
+          if (seen.has(r.actId)) return false;                                               // deduplicate by decision
           seen.add(r.actId);
           return true;
         });
     };
 
-    const [vectorCandidates, keywordCandidates] = await Promise.all([
+    const [vectorCandidates, rawKeywordCandidates] = await Promise.all([
       getVectorCandidates(),
-      // Keyword search applies actYear filter natively inside the BM25 index —
-      // no post-filter needed. Fetch 30 chunks; RRF deduplicates by actId.
+      // BM25 handles exact single-year matches natively; for ranges it returns
+      // all years and we post-filter on actDate below.
       ctx.runQuery(api.vksSearchQueries.keywordSearchDecisions, {
         query:      args.query,
         department: args.department,
-        actYear:    args.actYear,
+        // BM25 only supports exact-match year filter — pass actYear only for single-year exact match
+        actYear:    (args.actYearFrom && args.actYearFrom === args.actYearTo) ? args.actYearFrom : undefined,
         limit:      30,
       }),
     ]);
+
+    // Post-filter keyword candidates by year range (mirrors the vector path).
+    // Necessary when actYearFrom !== actYearTo — BM25 returns all years in that case.
+    const keywordCandidates = rawKeywordCandidates.filter(row => {
+      if (args.actYearFrom && row.actDate < `${args.actYearFrom}-01-01`) return false;
+      if (args.actYearTo   && row.actDate > `${args.actYearTo}-12-31`)   return false;
+      return true;
+    });
 
     // ── Step 3: Merge with Reciprocal Rank Fusion ─────────────────────────
     // Decisions appearing in both lists get a combined RRF score; decisions
@@ -334,9 +349,6 @@ export const searchDecisions = action({
         actTitle:   c.actTitle,
         actUrl:     c.actUrl,
         actDate:    c.actDate,
-        actNumber:  c.actNumber,
-        caseNumber: c.caseNumber,
-        caseYear:   c.caseYear,
         department: c.department,
         chunkIndex: c.chunkIndex,
       }));

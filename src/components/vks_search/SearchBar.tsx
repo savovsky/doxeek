@@ -1,4 +1,5 @@
 import { useState }        from "react";
+import Autocomplete       from "@mui/material/Autocomplete";
 import Box                 from "@mui/material/Box";
 import Button              from "@mui/material/Button";
 import Stack               from "@mui/material/Stack";
@@ -22,9 +23,19 @@ interface Props {
 }
 
 export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Props) {
-  const [query,   setQuery]   = useState("");
-  const [actYear, setActYear] = useState("");
+  const [query,      setQuery]      = useState("");
+  const [department, setDepartment] = useState<"commercial" | "civil" | "all">("all");
+  const [yearFrom,   setYearFrom]   = useState("");
+  const [yearTo,     setYearTo]     = useState("");
   const theme = useTheme();
+
+  // VKS decisions span 2008–present; newest first for a more useful dropdown
+  // TODO: after S26 ingest, replace with a Convex query on vksChunkMetadata
+  // to derive the actual set of years present in the corpus
+  const availableYears = Array.from(
+    { length: new Date().getFullYear() - 2007 },
+    (_, i) => String(new Date().getFullYear() - i)
+  );
 
   const isSemanticMode = searchMode === "vector";
 
@@ -36,9 +47,10 @@ export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Pro
     if (!query.trim()) return;
     onSearch({
       query,
-      department: "commercial",   // hardcoded for POC
-      actYear:    actYear || undefined,
-      limit:      20,
+      department:  department === "all" ? undefined : department,
+      actYearFrom: yearFrom || undefined,
+      actYearTo:   yearTo   || undefined,
+      limit:       20,
     });
   };
 
@@ -108,17 +120,44 @@ export function SearchBar({ onSearch, isLoading, searchMode, onModeChange }: Pro
           </Stack>
         </Stack>
 
-        {/* Row 2: year filter */}
-        <Stack direction="row" spacing={2}>
-          <TextField
+        {/* Row 2: department toggle + year range */}
+        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+
+          {/* Department toggle */}
+          <ToggleButtonGroup
+            value={department}
+            exclusive
             size="small"
-            label="Year"
-            value={actYear}
-            onChange={(e) => setActYear(e.target.value)}
-            placeholder="e.g. 2016"
-            inputProps={{ maxLength: 4 }}
-            sx={{ width: 120 }}
-          />
+            onChange={(_, val) => { if (val) setDepartment(val); }}
+          >
+            <ToggleButton value="all"        sx={{ px: 1.5, fontSize: 13 }}>И двете</ToggleButton>
+            <ToggleButton value="commercial" sx={{ px: 1.5, fontSize: 13 }}>Търговско</ToggleButton>
+            <ToggleButton value="civil"      sx={{ px: 1.5, fontSize: 13 }}>Гражданско</ToggleButton>
+          </ToggleButtonGroup>
+
+          {/* Year range */}
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Autocomplete
+              options={availableYears}
+              value={yearFrom || null}
+              onChange={(_, val) => setYearFrom(val ?? "")}
+              renderInput={(params) => (
+                <TextField {...params} size="small" label="От година" sx={{ width: 130 }} />
+              )}
+              freeSolo
+            />
+            <Typography variant="body2" color="text.secondary">—</Typography>
+            <Autocomplete
+              options={availableYears}
+              value={yearTo || null}
+              onChange={(_, val) => setYearTo(val ?? "")}
+              renderInput={(params) => (
+                <TextField {...params} size="small" label="До година" sx={{ width: 130 }} />
+              )}
+              freeSolo
+            />
+          </Stack>
+
         </Stack>
 
       </Stack>

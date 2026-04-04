@@ -16,19 +16,16 @@ export type SearchResult = {
   actTitle:   string;
   actUrl:     string;
   actDate:    string;
-  actNumber:  string;
-  caseNumber: string;
-  caseYear:   string;
   department: string;
   chunkIndex: number;
 };
 
 export interface SearchParams {
-  query:      string;
-  department?: string;
-  actYear?:   string;
-  limit?:     number;
-  // sectionType REMOVED in S9
+  query:        string;
+  department?:  string;   // "commercial" | "civil" | undefined = both
+  actYearFrom?: string;   // "2015" — range start (inclusive)
+  actYearTo?:   string;   // "2020" — range end (inclusive)
+  limit?:       number;
 }
 
 export function useVksSearch() {
