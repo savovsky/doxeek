@@ -79,6 +79,27 @@
 //      The same Set is initialised from downloadedActsIds on resume so dedup works
 //      correctly across interrupted and continued runs.
 //
+//   8. RANGE SCANNING (--from / --to)
+//      The VKS numbering has large gaps — after the last contiguous block of
+//      un0_Numbers (e.g. ~900 for commercial, ~1600 for civil), there may be
+//      additional blocks of decisions at much higher numbers (e.g. 50000–50350,
+//      60000–60350). The consecutive-empty auto-stop condition cannot bridge
+//      these gaps because it terminates after 50 consecutive empty numbers.
+//
+//      --from <N> --to <M>  scans every un0_Number from N to M (inclusive).
+//      In this mode:
+//        • The consecutive-empty auto-stop is DISABLED — the script processes
+//          every number in the range regardless of how many return zero results.
+//        • The existing output file is ALWAYS loaded (like --resume) so new
+//          links are merged into the existing collection and dedup works
+//          correctly against previously collected actIds.
+//        • --resume is ignored (the range defines exactly where to start/stop).
+//        • --limit is ignored (--to serves the same purpose).
+//
+//      This mode is designed for targeted scans of known non-contiguous blocks.
+//      Run the normal mode first to collect the main contiguous range, then use
+//      --from/--to to pick up isolated blocks at higher numbers.
+//
 // USAGE (run from project root: cd C:\work\personal\projects\doxeek)
 //   # Test run (small batch first — verify output before going full scale)
 //   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 10 --verbose
@@ -93,6 +114,11 @@
 //
 //   # Verbose output (prints per-result detail and parse warnings)
 //   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 10 --verbose
+//
+//   # Scan a specific range of un0_Numbers (e.g. isolated blocks after a gap)
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --from 50000 --to 50350
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil --from 60000 --to 60350
+//   npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --from 50000 --to 50350 --verbose
 //
 // OUTPUT FILES
 //   downloads/vks/department_commercial/decisions/decisionsLinksMetadataCommercial.ts
@@ -154,6 +180,14 @@ interface CLIOptions {
   resume: boolean;    // load existing data and continue from the last processed number
   verbose: boolean;   // print extra per-result detail and parse warnings
   department: string; // "commercial" or "civil" — required, no default
+  from: number;       // --from: start of a targeted un0_Number range scan (inclusive)
+                      // when set together with --to, enables range-scan mode which:
+                      //   • disables the consecutive-empty auto-stop
+                      //   • always loads existing data (implicit --resume for merging)
+                      //   • ignores --limit and --resume flags
+                      // defaults to 0 (disabled)
+  to: number;         // --to: end of a targeted un0_Number range scan (inclusive)
+                      // must be >= --from; defaults to 0 (disabled)
 }
 
 // ============================================================================
@@ -520,6 +554,8 @@ function parseCLIArgs(): CLIOptions {
     resume: false,
     verbose: false,
     department: '',
+    from: 0,  // 0 = disabled (range-scan mode is off)
+    to: 0,    // 0 = disabled
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -533,6 +569,12 @@ function parseCLIArgs(): CLIOptions {
       options.verbose = true;
     } else if (arg === '--department' && i + 1 < args.length) {
       options.department = args[i + 1];
+      i++;
+    } else if (arg === '--from' && i + 1 < args.length) {
+      options.from = parseInt(args[i + 1], 10) || 0;
+      i++;
+    } else if (arg === '--to' && i + 1 < args.length) {
+      options.to = parseInt(args[i + 1], 10) || 0;
       i++;
     }
   }
@@ -549,11 +591,29 @@ function validateCLIOptions(options: CLIOptions): void {
     console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department civil');
     console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --resume');
     console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --limit 10 --verbose  (test run)');
+    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --from 50000 --to 50350');
     process.exit(1);
   }
 
   if (options.limit <= 0) {
     console.log('❌ --limit must be greater than 0 (omit the flag entirely to collect all available)');
+    process.exit(1);
+  }
+
+  // Validate --from / --to range-scan flags
+  const hasFrom = options.from > 0;
+  const hasTo = options.to > 0;
+
+  if (hasFrom !== hasTo) {
+    // One provided without the other — both are required for range-scan mode
+    console.log('❌ --from and --to must be used together (both are required for range scanning)');
+    console.log('\nExample:');
+    console.log('  npx ts-node scripts/scraperVksDecisionsLinks.ts --department commercial --from 50000 --to 50350');
+    process.exit(1);
+  }
+
+  if (hasFrom && hasTo && options.from > options.to) {
+    console.log(`❌ --from (${options.from}) must be less than or equal to --to (${options.to})`);
     process.exit(1);
   }
 }
@@ -564,15 +624,53 @@ function validateCLIOptions(options: CLIOptions): void {
 
 async function collectLinks(): Promise<void> {
   const dept = cliOptions.department.charAt(0).toUpperCase() + cliOptions.department.slice(1);
-  log(`\n🚀 VCS ${dept} Department Decisions Links Scraper`);
+
+  // ── Determine operating mode ─────────────────────────────────────────────
+  // Range-scan mode: --from and --to are both set (> 0)
+  //   → scan exactly that range, disable auto-stop, always merge with existing data
+  // Normal mode: no --from/--to
+  //   → original behavior with optional --resume and --limit
+  const isRangeScan = cliOptions.from > 0 && cliOptions.to > 0;
+
+  if (isRangeScan) {
+    log(`\n🚀 VCS ${dept} Department Decisions Links Scraper (RANGE SCAN)`);
+    log(`   Scanning un0_Number range: ${cliOptions.from} → ${cliOptions.to}`);
+  } else {
+    log(`\n🚀 VCS ${dept} Department Decisions Links Scraper`);
+  }
   log('━'.repeat(60));
 
   ensureOutputDirectory();
 
   let data: IActsLinksData;
   let startNumber = 1;
+  let endNumber = cliOptions.limit; // used for the loop upper bound
 
-  if (cliOptions.resume) {
+  if (isRangeScan) {
+    // ── Range-scan mode ──────────────────────────────────────────────────
+    // Always load existing data so new links merge with the existing collection.
+    // This is implicit --resume for data merging — but the start number comes
+    // from --from, not from the last processed number.
+    startNumber = cliOptions.from;
+    endNumber = cliOptions.to;
+
+    const existing = loadExistingMetadata();
+    if (existing) {
+      data = existing;
+      log(`✅ Loaded existing metadata: ${data.links.length} links, ${data.downloadedNumbers.length} numbers processed`);
+      log(`📄 Range scan: will process un0_Numbers ${startNumber} to ${endNumber} and merge into existing data`);
+    } else {
+      log('ℹ️ No existing metadata found — range scan results will create a new file');
+      data = {
+        downloadedLinksCount: 0,
+        downloadedNumbers: [],
+        failedToDownloadNumbers: [],
+        failedToParseLinksFromNumbers: [],
+        downloadedActsIds: [],
+        links: [],
+      };
+    }
+  } else if (cliOptions.resume) {
     const existing = loadExistingMetadata();
     if (existing) {
       data = existing;
@@ -625,8 +723,12 @@ async function collectLinks(): Promise<void> {
                                               // NOTE: 5 was too small — the VKS numbering has natural
                                               // gaps (voided/unassigned numbers) larger than 5 in places,
                                               // causing premature termination before the indexed range ends.
+                                              // DISABLED in range-scan mode — the entire --from..--to
+                                              // range is always processed regardless of gaps.
 
-  while (un0Number <= cliOptions.limit && consecutiveEmptyNumbers < MAX_CONSECUTIVE_EMPTY_NUMBERS) {
+  // In range-scan mode: loop from --from to --to, ignore consecutive-empty stop.
+  // In normal mode: loop from startNumber to --limit, stop on consecutive empties.
+  while (un0Number <= endNumber && (isRangeScan || consecutiveEmptyNumbers < MAX_CONSECUTIVE_EMPTY_NUMBERS)) {
     log(`Fetching document number ${un0Number} (Start=1)...`);
 
     const html = await fetchPageWithRetry(un0Number);
@@ -702,7 +804,7 @@ async function collectLinks(): Promise<void> {
 
     log(`Found ${foundOnNumber} items, added ${addedOnNumber} (${duplicatesOnNumber} duplicates, ${failedToParseOnNumber} failed to parse)`);
     log(`Total downloaded: ${data.links.length}`);
-    log(`Document number: ${un0Number} / ${cliOptions.limit}\n`);
+    log(`Document number: ${un0Number} / ${endNumber}\n`);
 
     // Track consecutive empty numbers for the auto-stop condition
     if (foundOnNumber === 0) {
@@ -711,7 +813,7 @@ async function collectLinks(): Promise<void> {
       consecutiveEmptyNumbers = 0;
     }
 
-    if (consecutiveEmptyNumbers >= MAX_CONSECUTIVE_EMPTY_NUMBERS) {
+    if (!isRangeScan && consecutiveEmptyNumbers >= MAX_CONSECUTIVE_EMPTY_NUMBERS) {
       log(`⚠️ Stopping: ${MAX_CONSECUTIVE_EMPTY_NUMBERS} consecutive numbers with no new items`);
       break;
     }
@@ -719,8 +821,12 @@ async function collectLinks(): Promise<void> {
     // Save after every number — at most ~30 links are lost if the process crashes
     saveMetadata(data);
 
-    if (un0Number >= cliOptions.limit) {
-      log(`✅ Reached document number limit: ${cliOptions.limit === Number.MAX_SAFE_INTEGER ? 'none' : cliOptions.limit}`);
+    if (un0Number >= endNumber) {
+      if (isRangeScan) {
+        log(`✅ Reached end of range: ${endNumber}`);
+      } else {
+        log(`✅ Reached document number limit: ${cliOptions.limit === Number.MAX_SAFE_INTEGER ? 'none' : cliOptions.limit}`);
+      }
       break;
     }
 

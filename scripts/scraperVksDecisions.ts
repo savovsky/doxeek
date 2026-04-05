@@ -227,7 +227,7 @@ let CONFIG = {
   API_DELAY_MS: 3000,
   TIMEOUT_PER_REQUEST: 30000,
   MAX_RETRIES: 3,
-  VALIDATION_MIN_CONTENT_LENGTH: 1000,
+  VALIDATION_MIN_CONTENT_LENGTH: 800,
   VALIDATION_MIN_WORD_COUNT: 50,
 };
 
@@ -541,7 +541,7 @@ function stripHtmlForLengthCheck(raw: string): string {
 }
 
 function extractContentFromHtml(html: string): string | null {
-  const minTextLen = CONFIG.VALIDATION_MIN_CONTENT_LENGTH; // 1000 — same as validation
+  const minTextLen = CONFIG.VALIDATION_MIN_CONTENT_LENGTH; // 800 — same as validation
 
   // Pattern 1: Most common layout — decision body inside <font size="4">
   let match = html.match(/<font size="4"([\s\S]*?)<\/div><\/td><\/tr>\s*<\/table>/);
